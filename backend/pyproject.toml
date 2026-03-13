@@ -1,0 +1,57 @@
+[project]
+name = "matsu-shi-backend"
+version = "0.1.0"
+description = "Matsu Shi — AI assistant for Komatsu mechanics"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]",
+    "aiogram>=3.0",
+    "pydantic-ai",
+    "pydantic-settings",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg",
+    "alembic",
+    "pgvector",
+    "langfuse>=3",
+    "loguru",
+    "llama-index",
+    "llama-index-vector-stores-postgres",
+    "boto3",
+    "pillow",
+    "python-jose[cryptography]",
+    "passlib[bcrypt]",
+    "redis[asyncio]",
+    "python-dotenv",
+    "docling>=2.0",
+    "openai>=1.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "ruff",
+    "mypy",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = false
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

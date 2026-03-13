@@ -1,0 +1,6 @@
+# Automatically loaded by `docker compose` in development.
+# NOT used in production (deploy from docker-compose.yml only).
+services:
+  backend:
+    build:
+      target: dev

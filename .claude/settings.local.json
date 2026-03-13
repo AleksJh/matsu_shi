@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose:*)",
+      "Bash(grep -E \"^[^.]*\\\\.[a-zA-Z]+$\")",
+      "Bash(npm run:*)",
+      "Bash(cmd /c \"cd \"\"c:\\\\scripts\\\\Matsu Shi\\\\frontend\"\" && npm run build 2>&1\")",
+      "Bash(powershell -Command \"Set-Location ''c:\\\\scripts\\\\Matsu Shi\\\\frontend''; npm run build 2>&1\")",
+      "Bash(powershell -Command \"Get-Command node, npm, npx -ErrorAction SilentlyContinue | Select-Object Name, Source\")",
+      "Bash(powershell -Command \"Get-ChildItem ''C:\\\\Antigravity\\\\bin'' -ErrorAction SilentlyContinue | Select-Object Name\")",
+      "Bash(docker exec:*)",
+      "Bash(docker ps:*)",
+      "Bash(grep -E '\\\\.\\(js|ts|json\\)$')",
+      "Read(//c/Users/Aleksan.Jhangiryan/AppData/Local/Programs//**)",
+      "Bash(cmd /c \"cd \"\"c:\\\\scripts\\\\Matsu Shi\\\\admin-frontend\"\" && node_modules\\\\.bin\\\\tsc --noEmit 2>&1\")",
+      "Bash(cmd /c \"node_modules\\\\.bin\\\\tsc --noEmit 2>&1\")",
+      "Bash(find 'c:\\\\scripts\\\\Matsu Shi' -type f -name *.yml -o -name *.yaml -o -name docker-compose*)",
+      "Bash(find 'c:\\\\scripts\\\\Matsu Shi' -type f \\\\\\(-name *.py -o -name *.ts -o -name *.tsx -o -name *.json -o -name *.yml -o -name *.yaml -o -name *.md -o -name *.html -o -name Dockerfile -o -name .gitignore -o -name .env* \\\\\\) ! -path */node_modules/* ! -path */__pycache__/* ! -path */.venv/* ! -path */.mypy_cache/*)",
+      "Bash(find 'c:\\\\scripts\\\\Matsu Shi' -type f \\\\\\(-name *.conf -o -name *.txt \\\\\\) ! -path */node_modules/* ! -path */.venv/*)",
+      "Read(//c/scripts/Matsu Shi/**)",
+      "Read(//usr/local/bin/**)",
+      "Bash(command -v npm)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Read(//c/Users/Aleksan.Jhangiryan/AppData/Local/Python/bin/**)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/Aleksan.Jhangiryan/AppData/**)",
+      "Bash(find 'c:\\\\scripts\\\\Matsu Shi' -type f -name *.json ! -path */node_modules/*)",
+      "Bash(find 'c:\\\\scripts\\\\Matsu Shi' -maxdepth 4 -type f \\\\\\(-name *.py -o -name *.ts -o -name *.tsx -o -name *.json -o -name *.md -o -name *.toml -o -name *.yaml -o -name *.yml \\\\\\) ! -path */node_modules/* ! -path */.venv/* ! -path */.mypy_cache/*)",
+      "Bash(\"c:/scripts/Matsu Shi/.github/workflows/ci.yml\":*)"
+    ]
+  }
+}

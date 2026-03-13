@@ -1,0 +1,60 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: ./admin-frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    env_file: .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-matsu_shi}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - backend
+      - frontend
+      - admin
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.13"
+      - run: uv pip install --system ruff mypy pydantic pydantic-settings
+        working-directory: backend
+      - run: ruff check app/
+        working-directory: backend
+      - run: mypy app/ --ignore-missing-imports
+        working-directory: backend
+
+  lint-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            frontend/package-lock.json
+            admin-frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npx tsc --noEmit
+        working-directory: frontend
+      - run: npm ci
+        working-directory: admin-frontend
+      - run: npx tsc --noEmit
+        working-directory: admin-frontend
+
+  test-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.13"
+      - run: uv pip install --system -r pyproject.toml pytest pytest-asyncio httpx
+        working-directory: backend
+      - run: pytest tests/unit/ -v
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost/matsu_test
+          REDIS_URL: redis://localhost:6379
+          SECRET_KEY: ci-test-secret-key-32-chars-minimum
+          BOT_TOKEN: "0000000000:AABBCCDDEEFFaabbccddeeff-test"
+          ADMIN_TELEGRAM_ID: "123456789"
+          APP_BASE_URL: "https://example.com"
+          EMBED_MODEL: "test-embed-model"
+          LLM_LITE_MODEL: "test-lite-model"
+          LLM_ADVANCED_MODEL: "test-advanced-model"
+          ENVIRONMENT: "development"
+          EMBED_DIM: "1024"
+          JINA_API_KEY: "test-jina-key"
+          OPENROUTER_API_KEY: "test-openrouter-key"
+          GOOGLE_API_KEY: "test-google-key"
+          R2_BUCKET: "test-bucket"
+          R2_ENDPOINT: "https://test.r2.cloudflarestorage.com"
+          R2_ACCESS_KEY: "test-access-key"
+          R2_SECRET_KEY: "test-secret-key"
+          LANGFUSE_PUBLIC_KEY: "test-public-key"
+          LANGFUSE_SECRET_KEY: "test-langfuse-secret"
+          LANGFUSE_HOST: "https://cloud.langfuse.com"

@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  devcontainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/workspace:cached
+      # Isolate node_modules inside the container so they don't overwrite host folders
+      - devcontainer_frontend_nm:/workspace/frontend/node_modules
+      - devcontainer_admin_nm:/workspace/admin-frontend/node_modules
+    environment:
+      - PYTHONPATH=/workspace/backend
+    env_file:
+      - ../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: matsu_shi
+    volumes:
+      - devcontainer_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d matsu_shi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - devcontainer_redis_data:/data
+
+volumes:
+  devcontainer_pg_data:
+  devcontainer_redis_data:
+  devcontainer_frontend_nm:
+  devcontainer_admin_nm:
