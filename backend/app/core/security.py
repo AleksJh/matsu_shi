@@ -34,7 +34,7 @@ from app.services.user_service import UserService
 # Password hashing
 # ---------------------------------------------------------------------------
 
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__truncate_error=False)
 
 # ---------------------------------------------------------------------------
 # OAuth2 scheme — reads Bearer token from Authorization header

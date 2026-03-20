@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.models import Base  # noqa: F401 — ensures metadata is populated
 from app.models.admin_user import AdminUser
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__truncate_error=False)
 
 
 async def create_or_update_admin(username: str, password: str) -> None:
