@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import (
+    _verify_password,
     create_access_token,
-    pwd_ctx,
     validate_telegram_init_data,
 )
 from app.models.admin_user import AdminUser
@@ -97,7 +97,7 @@ async def auth_admin_login(
     )
     admin = result.first()
 
-    if admin is None or not pwd_ctx.verify(body.password, admin.password_hash):
+    if admin is None or not _verify_password(body.password, admin.password_hash):
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
     token = create_access_token(user_id=admin.id, role="admin")

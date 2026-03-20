@@ -9,7 +9,7 @@ import argparse
 import asyncio
 import sys
 
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -18,8 +18,6 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 from app.models import Base  # noqa: F401 — ensures metadata is populated
 from app.models.admin_user import AdminUser
-
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__truncate_error=False)
 
 
 async def create_or_update_admin(username: str, password: str) -> None:
@@ -32,7 +30,7 @@ async def create_or_update_admin(username: str, password: str) -> None:
         )
         existing: AdminUser | None = result.scalar_one_or_none()
 
-        password_hash = _pwd_context.hash(password)
+        password_hash = _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt(12)).decode("utf-8")
 
         if existing:
             existing.password_hash = password_hash
