@@ -26,7 +26,9 @@
       "Read(//c/Users/Aleksan.Jhangiryan/AppData/**)",
       "Bash(find 'c:\\\\scripts\\\\Matsu Shi' -type f -name *.json ! -path */node_modules/*)",
       "Bash(find 'c:\\\\scripts\\\\Matsu Shi' -maxdepth 4 -type f \\\\\\(-name *.py -o -name *.ts -o -name *.tsx -o -name *.json -o -name *.md -o -name *.toml -o -name *.yaml -o -name *.yml \\\\\\) ! -path */node_modules/* ! -path */.venv/* ! -path */.mypy_cache/*)",
-      "Bash(\"c:/scripts/Matsu Shi/.github/workflows/ci.yml\":*)"
+      "Bash(\"c:/scripts/Matsu Shi/.github/workflows/ci.yml\":*)",
+      "Bash(ssh root@89.167.125.113 \"cat /root/matsu_shi/.env\")",
+      "Read(//c/Users/Aleksan.Jhangiryan/.claude/**)"
     ]
   }
 }
