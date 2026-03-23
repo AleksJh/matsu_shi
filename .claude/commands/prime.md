@@ -1,0 +1,71 @@
+---
+description: Prime agent with codebase understanding
+---
+
+# Prime: Load Project Context
+
+## Objective
+
+Build comprehensive understanding of the codebase by analyzing structure, documentation, and key files.
+
+## Process
+
+### 1. Analyze Project Structure
+
+List all tracked files:
+Show directory structure:
+
+
+### 2. Read Core Documentation
+
+- Read the PRD.md or similar spec file
+- Read CLAUDE.md or similar global rules file
+- Read README files at project root and major directories
+- Read any architecture documentation
+- Understand the database schema
+
+### 3. Identify Key Files
+
+Based on the structure, identify and read:
+- Main entry points 
+- Core configuration files 
+- Key model/schema definitions
+- Important service or controller files
+
+### 4. Understand Current State
+
+Check recent activity via git logs:
+Check current branch and status:
+
+
+## Output Report
+
+Provide a concise summary covering:
+
+### Project Overview
+- Purpose and type of application
+- Primary technologies and frameworks
+- Current version/state
+
+### Architecture
+- Overall structure and organization
+- Key architectural patterns identified
+- Important directories and their purposes
+
+### Tech Stack
+- Languages and versions
+- Frameworks and major libraries
+- Build tools and package managers
+- Testing frameworks
+
+### Core Principles
+- Code style and conventions observed
+- Documentation standards
+- Testing approach
+
+### Current State
+- Active branch
+- Recent changes or development focus
+- Any immediate observations or concerns
+
+**Make this summary easy to scan - use bullet points and clear headers.**
