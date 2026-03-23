@@ -278,6 +278,41 @@ def _apply_overlap(
     return result
 
 
+def _merge_small_chunks(chunks: list[ChunkData], min_tokens: int) -> list[ChunkData]:
+    """Merge text chunks smaller than min_tokens into the preceding text chunk.
+
+    Deep subsections (e.g. 3.15.4.5) often produce very short chunks that embed
+    poorly and add retrieval noise.  This post-processing step absorbs them into
+    the parent/sibling text chunk that immediately precedes them.
+
+    Rules:
+    - Only text-type chunks are merged; tables and visual_captions are never touched.
+    - A tiny chunk with no preceding text chunk (e.g. very first chunk) is kept as-is.
+    - After merging, chunk_index values are resequenced 0..N-1.
+    """
+    merged: list[ChunkData] = []
+    for chunk in chunks:
+        if (
+            chunk.chunk_type == "text"
+            and chunk.token_count < min_tokens
+            and merged
+            and merged[-1].chunk_type == "text"
+        ):
+            prev = merged[-1]
+            new_content = prev.content + "\n\n" + chunk.content
+            merged[-1] = dc_replace(
+                prev,
+                content=new_content,
+                token_count=_count_tokens(new_content),
+                # Keep prev's section_title (parent heading) and page_number
+            )
+        else:
+            merged.append(chunk)
+
+    # Reindex sequentially after merges
+    return [dc_replace(c, chunk_index=i) for i, c in enumerate(merged)]
+
+
 # ---------------------------------------------------------------------------
 # Step 3: Chunking
 # ---------------------------------------------------------------------------
@@ -376,6 +411,9 @@ async def step_chunk(
 
     _flush_text_buf()  # flush remaining buffer
 
+    # Post-processing: merge tiny text chunks into the preceding text chunk before overlap
+    chunks = _merge_small_chunks(chunks, settings.CHUNK_MIN_TOKENS)
+
     # Rule 4 — apply 10% overlap to adjacent text chunks
     chunks = _apply_overlap(chunks)
 
@@ -469,9 +507,12 @@ async def step_enrich(
                             content=f"[Контекст: {summary}]\n\n{chunk.content}",
                         )
                 elif chunk.chunk_type == "table":
+                    section_ctx = f"Раздел: {chunk.section_title}. " if chunk.section_title else ""
+                    page_ctx = f"Страница {chunk.page_number}. " if chunk.page_number else ""
                     prompt = (
-                        f"Опиши одной строкой, что содержит следующая таблица, "
-                        f"в контексте документа '{doc_name}' модели '{machine_model}'.\n\n"
+                        f"Техника: {machine_model}. {section_ctx}{page_ctx}\n\n"
+                        f"Опиши в 1-2 предложениях на русском языке: что содержит следующая "
+                        f"таблица и в какой ситуации механик её использует.\n\n"
                         f"{chunk.content}"
                     )
                     response = gemini_client.models.generate_content(
@@ -482,7 +523,7 @@ async def step_enrich(
                     if header:
                         result_chunks[i] = dc_replace(
                             chunk,
-                            content=f"{header}\n\n{chunk.content}",
+                            content=f"[Таблица: {header}]\n\n{chunk.content}",
                         )
             except Exception as exc:
                 logger.warning(f"enrich failed for chunk {i}: {exc}")

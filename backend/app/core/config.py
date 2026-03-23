@@ -57,5 +57,8 @@ class Settings(BaseSettings):
     # Confirm actual dim from first OpenRouter call; update .env before applying migration
     EMBED_DIM: int = 1024
 
+    # Chunking — text chunks smaller than this are merged into the preceding text chunk
+    CHUNK_MIN_TOKENS: int = 80
+
 
 settings = Settings()
