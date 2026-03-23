@@ -51,6 +51,8 @@ def _import_step_chunk():
                 CF_R2_PUBLIC_BASE_URL="http://r2",
                 GEMINI_API_KEY="x",
                 LLM_ADVANCED_MODEL="gemini",
+                LLM_LITE_MODEL="gemini-lite",
+                CHUNK_MIN_TOKENS=80,
             )),
             "app.core.database": MagicMock(),
             "app.models.document": MagicMock(),
@@ -99,6 +101,11 @@ def ChunkData(ingest_mod):
 @pytest.fixture(scope="module")
 def ParseResult(ingest_mod):
     return ingest_mod.ParseResult
+
+
+@pytest.fixture(scope="module")
+def merge_small_chunks(ingest_mod):
+    return ingest_mod._merge_small_chunks
 
 
 # ---------------------------------------------------------------------------
@@ -389,3 +396,111 @@ class TestEdgeCases:
             assert chunk.content.strip(), (
                 f"Chunk {chunk.chunk_index} has empty content"
             )
+
+
+# ---------------------------------------------------------------------------
+# _merge_small_chunks — post-processing step (CHUNK_MIN_TOKENS)
+# ---------------------------------------------------------------------------
+
+
+class TestMergeSmallChunks:
+    """Tests for the _merge_small_chunks() helper (PRD Phase 9 improvement)."""
+
+    def _make_text_chunk(self, ChunkData, content: str, index: int = 0) -> object:
+        from app.rag.embedder import embed_text  # noqa: F401 (not actually imported)
+        return ChunkData(
+            chunk_index=index,
+            content=content,
+            chunk_type="text",
+            section_title=f"Section {index}",
+            page_number=index + 1,
+            visual_refs=[],
+            token_count=len(content.split()),  # rough token count for test purposes
+            doc_name="test_doc",
+            machine_model="WB97S-5",
+            category=None,
+        )
+
+    def _make_table_chunk(self, ChunkData, content: str, index: int = 0) -> object:
+        return ChunkData(
+            chunk_index=index,
+            content=content,
+            chunk_type="table",
+            section_title="Some Section",
+            page_number=1,
+            visual_refs=[],
+            token_count=len(content.split()),
+            doc_name="test_doc",
+            machine_model="WB97S-5",
+            category=None,
+        )
+
+    def test_tiny_chunk_merged_into_previous(self, merge_small_chunks, ChunkData, ingest_mod):
+        """A text chunk with token_count < min_tokens merges into the preceding text chunk."""
+        big = self._make_text_chunk(ChunkData, " ".join([f"w{i}" for i in range(100)]), index=0)
+        tiny = self._make_text_chunk(ChunkData, "tiny", index=1)
+        tiny_with_count = ingest_mod.dc_replace(tiny, token_count=5)
+
+        result = merge_small_chunks([big, tiny_with_count], min_tokens=80)
+
+        assert len(result) == 1, f"Expected 1 merged chunk, got {len(result)}"
+        assert "tiny" in result[0].content
+        assert result[0].chunk_index == 0
+
+    def test_chunk_above_threshold_not_merged(self, merge_small_chunks, ChunkData, ingest_mod):
+        """A text chunk with token_count >= min_tokens is kept as a separate chunk."""
+        big = self._make_text_chunk(ChunkData, " ".join([f"w{i}" for i in range(100)]), index=0)
+        medium = self._make_text_chunk(ChunkData, " ".join([f"x{i}" for i in range(90)]), index=1)
+        medium_with_count = ingest_mod.dc_replace(medium, token_count=90)
+
+        result = merge_small_chunks([big, medium_with_count], min_tokens=80)
+
+        assert len(result) == 2, f"Expected 2 chunks, got {len(result)}"
+
+    def test_table_chunk_never_merged(self, merge_small_chunks, ChunkData, ingest_mod):
+        """Table chunks are never absorbed into preceding text chunks."""
+        text = self._make_text_chunk(ChunkData, " ".join([f"w{i}" for i in range(100)]), index=0)
+        table = self._make_table_chunk(ChunkData, "| A | B |\n|---|---|\n| 1 | 2 |", index=1)
+        table_with_count = ingest_mod.dc_replace(table, token_count=5)
+
+        result = merge_small_chunks([text, table_with_count], min_tokens=80)
+
+        assert len(result) == 2
+        assert result[1].chunk_type == "table"
+
+    def test_tiny_first_chunk_kept_as_is(self, merge_small_chunks, ChunkData, ingest_mod):
+        """A tiny chunk with no preceding text chunk is kept (cannot merge into nothing)."""
+        tiny = self._make_text_chunk(ChunkData, "short", index=0)
+        tiny_with_count = ingest_mod.dc_replace(tiny, token_count=3)
+
+        result = merge_small_chunks([tiny_with_count], min_tokens=80)
+
+        assert len(result) == 1
+        assert result[0].content == "short"
+
+    def test_indices_resequenced_after_merge(self, merge_small_chunks, ChunkData, ingest_mod):
+        """chunk_index values must be 0..N-1 after merging."""
+        big = self._make_text_chunk(ChunkData, " ".join([f"w{i}" for i in range(100)]), index=0)
+        tiny1 = ingest_mod.dc_replace(self._make_text_chunk(ChunkData, "a", index=1), token_count=2)
+        big2 = ingest_mod.dc_replace(self._make_text_chunk(ChunkData, " ".join([f"x{i}" for i in range(100)]), index=2), token_count=100)
+
+        result = merge_small_chunks([big, tiny1, big2], min_tokens=80)
+
+        indices = [c.chunk_index for c in result]
+        assert indices == list(range(len(result))), f"Non-sequential indices: {indices}"
+
+    def test_step_chunk_respects_min_tokens(self, step_chunk, ParseResult):
+        """step_chunk() must call _merge_small_chunks: a single-word subsection merges."""
+        # Two headings: big section (many words) + tiny subsection (1 word)
+        big_text = " ".join([f"word{i}" for i in range(150)])
+        md = f"# Big Section\n\n{big_text}\n\n## Tiny\n\nX\n"
+        pr = make_parse_result(ParseResult, md)
+        chunks = run(step_chunk(pr, "WB97S-5", None, dry_run=True))
+
+        text_chunks = [c for c in chunks if c.chunk_type == "text"]
+        # "Tiny" section with content "X" has ~1 token → should be merged into "Big Section"
+        tiny_standalone = [c for c in text_chunks if c.section_title == "Tiny"]
+        assert len(tiny_standalone) == 0, (
+            f"Tiny section should have been merged, but found standalone chunk: "
+            f"{[c.content[:50] for c in tiny_standalone]}"
+        )
