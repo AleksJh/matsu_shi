@@ -2,6 +2,14 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # OpenCV / docling system deps
+    libxcb1 libx11-6 libxext6 libxrender1 libgomp1 \
+    libgl1 libglib2.0-0 \
+    # OCR engine
+    tesseract-ocr tesseract-ocr-rus \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install uv
 
 ENV UV_SYSTEM_PYTHON=1
