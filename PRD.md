@@ -70,6 +70,28 @@ python scripts/ingest.py --dir ./manuals/ [--rebuild-index]
 - `--rebuild-index` — drops existing chunks for the document (by checksum) and re-indexes
 - `--dry-run` — parse and chunk only, no writes
 
+**Checkpoint flags (Phase 8.7):** Intermediate results are saved as JSON artifacts in
+`{artifact-dir}/{sha256_checksum}/`. This allows resuming from any stage without re-running
+expensive steps (Docling parse, Gemini Vision, Gemini enrichment, embedding).
+
+- `--stop-after {parse,chunk,enrich,embed}` — save artifact and stop after this stage
+- `--start-from {chunk,enrich,embed,write}` — load artifact from cache and resume from this stage
+- `--save-artifacts` — save all intermediate artifacts during a full run (for inspection)
+- `--artifact-dir DIR` — artifact cache directory (default: `./cache`)
+
+```bash
+# Full pipeline with artifact saving (recommended for first-time ingestion):
+python scripts/ingest.py --path ./manual.pdf --machine-model "PC300-8" --save-artifacts
+
+# Inspect parse quality, then resume from chunking:
+python scripts/ingest.py --path ./manual.pdf --machine-model "PC300-8" --stop-after parse
+# ... inspect cache/{checksum}/parse.json ...
+python scripts/ingest.py --path ./manual.pdf --machine-model "PC300-8" --start-from chunk
+
+# Re-run chunking/enrichment/embedding without re-parsing (after tuning logic):
+python scripts/ingest.py --path ./manual.pdf --machine-model "PC300-8" --start-from chunk --rebuild-index
+```
+
 **Step-by-step pipeline:**
 
 ```

@@ -404,6 +404,14 @@
 
 **Phase 8 Done When:** `docker-compose.prod.yml` starts cleanly on the VPS; HTTPS works; Telegram webhook is registered and receives updates; CI passes on GitHub.
 
+### ✅ 8.7 Ingest Pipeline Checkpointing
+- Add `_compute_checksum()`, `_save_artifact()`, `_load_artifact()` to `backend/scripts/ingest.py`.
+- Add checkpoint CLI flags: `--stop-after`, `--start-from`, `--save-artifacts`, `--artifact-dir`.
+- Artifacts stored as JSON in `cache/{sha256_checksum}/{parse,visual,chunks,enriched,embedded}.json`.
+- Enables resuming pipeline from any stage — avoids re-running expensive Docling/Gemini/embedding steps when iterating on chunking or enrichment logic.
+- Standardize all unit test imports (conftest.py stubs all heavy deps; tests use `from scripts.ingest import ...`).
+- TDD: `backend/tests/unit/test_ingest_artifacts.py` — covers save/load roundtrips, stop-after, start-from, missing artifact errors.
+
 ---
 
 ## ⏳ PHASE 9 — Pilot & Tuning

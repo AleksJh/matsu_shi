@@ -1,131 +1,142 @@
 # Текущая фаза и задача
 
 **Фаза:** 9 — Pilot & Tuning
-**Задача:** 9.1 — Ingest Real Documents (первая задача фазы)
+**Задача:** 9.1 — Ingest Real Documents
 **Статус:** ⏳ не начата
 
 ---
 
 ## Цель
 
-Запустить `ingest.py` на реальных PDF-мануалах Komatsu, убедиться, что документы появляются
-в таблице `documents` и `chunks`, изображения — в Cloudflare R2, и что данные доступны
-для поиска через API. Это разблокирует задачи 9.2–9.5 (онбординг механиков, валидация
-порогов, верификационный план).
+Запустить `ingest.py` на реальных PDF-мануалах Komatsu и убедиться, что:
+- документы появляются в таблицах `documents` и `chunks` (видны в admin dashboard → Documents)
+- WebP-изображения загружены в Cloudflare R2 bucket (`matsu-shi-images`)
+- данные доступны для RAG-поиска через API
+
+Это разблокирует задачи 9.2–9.5: онбординг механиков, валидацию порогов, верификационный план.
 
 ---
 
 ## PRD References
 
-- **§4.1** — pipeline ingestion: Docling → Gemini visual → chunking → enrichment → embed → write
-- **§4.2** — 4 правила чанкинга
+- **§4.1** — шаги pipeline: Docling → Gemini Vision → chunking → enrichment → embedding → remote write
+- **§4.2** — 4 правила чанкинга (header-aware, table isolation, visual-link metadata, 10% overlap)
+- **§4.3** — обязательные поля метаданных chunk (все поля ChunkData должны быть заполнены)
+- **§9.3** — схемы таблиц `documents` и `chunks` (поля, типы, HNSW-индекс, machine_model индекс)
+- **§10** — список всех 13 env vars (DATABASE_URL, R2_*, GEMINI_API_KEY, OPENROUTER_API_KEY, EMBED_MODEL, EMBED_DIM, LANGFUSE_*)
 - **§13** — 18 тест-кейсов верификационного плана (выполнять в задаче 9.4)
-- **§8** — NFR: 0% hallucination, 100% citation, P95 < 8s
 
 ---
 
 ## Files to Create
 
-Нет новых файлов — Phase 9 является операционной фазой (данные + ручная верификация).
+Нет. Phase 9 — операционная фаза. Весь код уже написан в фазах 0–8.7.
 
 ---
 
 ## Files to Modify
 
-Нет изменений кода. Все действия выполняются вручную или через существующие скрипты.
+Нет изменений кода. При необходимости корректируются только:
+- `.env` на VPS (пороги `RETRIEVAL_SCORE_THRESHOLD`, `RETRIEVAL_NO_ANSWER_THRESHOLD` — задача 9.3)
 
 ---
 
 ## Key Imports & Dependencies
 
-- `backend/scripts/ingest.py` — главный CLI для инджеста
-- `backend/scripts/create_admin.py` — создание admin_users записи (нужен для dashboard)
-- `backend/scripts/register_webhook.py` — регистрация Telegram webhook на VPS
-- `backend/app/rag/` — dense_retriever, sparse_retriever, retriever (используются при запросах)
-- `backend/app/agent/` — classifier, router, responder (используются при запросах)
+- `backend/scripts/ingest.py` — главный CLI для инджеста (все 6 шагов + checkpoint)
+- `backend/app/rag/embedder.py` — `embed_text()` вызывается на шаге 5 (embed)
+- `backend/app/core/config.py` — `settings` (DATABASE_URL, R2_BUCKET, GEMINI_API_KEY, OPENROUTER_API_KEY, EMBED_MODEL, EMBED_DIM)
+- `backend/app/core/database.py` — `AsyncSessionLocal` (используется в step_write)
+- `backend/app/models/document.py` — ORM-модель `Document` (upsert по checksum)
+- `backend/app/models/chunk.py` — ORM-модель `Chunk` (batch insert с векторами)
 
 ---
 
 ## Implementation Notes
 
-### Task 9.1 — Ingest Real Documents
+### Критические блокеры перед 9.1
+
+Перед запуском убедиться, что:
+1. VPS запущен: `docker compose -f docker-compose.prod.yml up -d`
+2. Telegram webhook зарегистрирован: `python backend/scripts/register_webhook.py`
+3. Admin user создан: `python backend/scripts/create_admin.py --username admin --password <pass>`
+4. `.env` на VPS полностью заполнен (все 13 сервисов из PRD §10)
+
+### Запуск ingest.py (локально, не в Docker)
 
 ```bash
-# Запускать локально (НЕ в Docker), с production .env
 cd backend
-python scripts/ingest.py --path ./scripts/samples/<manual>.pdf \
+
+# Первый прогон — сохранить все артефакты для возможного возобновления:
+python scripts/ingest.py \
+  --path ./scripts/samples/<manual>.pdf \
   --machine-model "PC300-8" \
-  --category "hydraulics"
+  --category "hydraulics" \
+  --save-artifacts
+
+# Если нужно перечитать только chunking (parse+visual уже в cache):
+python scripts/ingest.py \
+  --path ./scripts/samples/<manual>.pdf \
+  --machine-model "PC300-8" \
+  --start-from chunk \
+  --rebuild-index
+
+# Dry-run для проверки без записи в БД и R2:
+python scripts/ingest.py \
+  --path ./scripts/samples/<manual>.pdf \
+  --machine-model "PC300-8" \
+  --dry-run
 ```
 
-- Проверить появление строки в таблице `documents` (admin dashboard → Documents)
-- Проверить `chunk_count` соответствует числу строк в таблице `chunks`
-- Проверить WebP файлы в R2 bucket (`matsu-shi-images`)
-- Spot-check 5–10 запросов в Langfuse: retrieval_score, model_used, citations
+### Checkpoint-флаги (Phase 8.7)
 
-### Task 9.2 — Onboard Test Mechanics
+| Флаг | Описание |
+|------|---------|
+| `--stop-after {parse,chunk,enrich,embed}` | Сохранить артефакт и остановиться |
+| `--start-from {chunk,enrich,embed,write}` | Загрузить артефакт и продолжить |
+| `--save-artifacts` | Сохранять все артефакты при полном прогоне |
+| `--artifact-dir DIR` | Директория кеша (default: `./cache`) |
 
-1. Пригласить 3–5 механиков в Telegram
-2. Провести через full flow: `/start` → pending → approve → Mini App
-3. Убедиться, что кнопка Mini App ведёт на production URL
-4. Проверить, что `WebAppInfo(url=settings.APP_BASE_URL)` корректен
+Артефакты: `cache/{sha256_checksum}/{parse,visual,chunks,enriched,embedded}.json`
 
-### Task 9.3 — Threshold Validation
+### Проверка результатов
 
-Проверить Langfuse после первых 50 запросов:
-- Если retrieval_score кластеризуется иначе ожидаемого → скорректировать в `.env`:
-  - `RETRIEVAL_SCORE_THRESHOLD` (default 0.65)
-  - `RETRIEVAL_NO_ANSWER_THRESHOLD` (default 0.30)
-- Убедиться: ни один ответ не возвращается без citations
+После успешного прогона:
+```bash
+# Проверить документ в БД:
+docker compose exec postgres psql -U $POSTGRES_USER -d $POSTGRES_DB \
+  -c "SELECT display_name, chunk_count, status FROM documents ORDER BY indexed_at DESC LIMIT 5;"
 
-### Task 9.4 — Run Verification Plan (PRD §13)
+# Проверить количество chunks:
+docker compose exec postgres psql -U $POSTGRES_USER -d $POSTGRES_DB \
+  -c "SELECT COUNT(*) FROM chunks WHERE machine_model = 'PC300-8';"
+```
 
-18 тест-кейсов из PRD §13:
-
-| # | Тест | Что проверить |
-|---|------|--------------|
-| 1 | Auth flow | `/start` → approve → Mini App |
-| 2 | Denied access | status denied → rejection |
-| 3 | Machine model selector | selection locks for session |
-| 4 | RAG accuracy | 10 error codes → correct doc+page |
-| 5 | Hallucination | absent topic → "Информация не найдена" |
-| 6 | Visual chunks | figure query → visual_url populated |
-| 7 | Domain filter | PC300 query → no PC200 data |
-| 8 | LLM routing | score < 0.65 → model_used = "advanced" |
-| 9 | Step-by-Step | complex query → session resumable |
-| 10 | Citation presence | all responses have [doc\|section\|page] |
-| 11 | Rate limiting | 16th request → HTTP 429 |
-| 12 | Admin ban | ban user → next query → HTTP 403 |
-| 13 | Feedback | 👎 → visible in admin Queries |
-| 14 | Ingestion CLI | new PDF → admin Documents page |
-| 15 | Docker restart | down && up → data preserved |
-| 16 | Telegram initData | tampered → HTTP 401 |
-| 17 | Langfuse | trace visible after query |
-
-### Task 9.5 — Monitoring Checklist
-
-- [ ] Langfuse dashboard: все трейсы видны с retrieval_score
-- [ ] `docker compose logs backend`: структурированные логи читаемы
-- [ ] Admin `/stats` в Telegram: точные данные
+- Открыть admin dashboard → Documents — убедиться, что документ виден с правильным `chunk_count` и статусом `indexed`
+- Проверить WebP в R2 bucket: `{machine_model}/{doc_name}/page_{n}.webp`
+- Spot-check 5–10 запросов в Langfuse: `retrieval_score`, `model_used`, наличие citations
 
 ---
 
 ## Integration Points
 
-- **Зависит от:** Phase 8 ✅ (VPS + SSL + webhook + CI)
-- **Использует:** все фазы 0–8 (полный стек)
-- **Критические блокеры перед 9.1:**
-  1. VPS запущен (`docker-compose.prod.yml up`)
-  2. Telegram webhook зарегистрирован (`register_webhook.py`)
-  3. Admin user создан (`create_admin.py`)
-  4. `.env` на VPS заполнен (все 13 сервисов из PRD §10)
+- **Зависит от:** Phase 8 ✅ (VPS + SSL + webhook + CI) и Phase 8.7 ✅ (ingest.py с checkpoint)
+- **Использует:** весь стек фаз 0–8
+- **Разблокирует:** Phase 9.2 (онбординг механиков), 9.3 (валидация порогов), 9.4 (верификационный план), 9.5 (мониторинг)
 
 ---
 
 ## Done When
 
-Phase 9 считается завершённой когда:
-- [ ] Все 18 тест-кейсов PRD §13 выполнены и задокументированы как PASS
-- [ ] Минимум 50 реальных запросов обработано без hallucinations или отсутствия citations
-- [ ] Langfuse dashboard показывает трейсы для всех запросов
-- [ ] 3–5 реальных механиков прошли полный onboarding flow
+**Задача 9.1 считается завершённой, когда:**
+- [ ] Как минимум один реальный PDF-мануал Komatsu проиндексирован без ошибок
+- [ ] Документ виден в admin dashboard → Documents с правильным `chunk_count` и `status = indexed`
+- [ ] WebP-файлы присутствуют в R2 bucket для страниц с диаграммами
+- [ ] 5–10 тестовых запросов возвращают chunks с `retrieval_score > 0.0` (данные searchable)
+- [ ] Langfuse показывает traces для тестовых запросов с полями `retrieval_score`, `model_used`
+
+**Phase 9 полностью завершена, когда:**
+- [ ] Все 18 тест-кейсов PRD §13 задокументированы как PASS (задача 9.4)
+- [ ] 50+ реальных запросов обработано без hallucinations или отсутствия citations
+- [ ] 3–5 реальных механиков прошли полный onboarding flow (задача 9.2)
+- [ ] Langfuse и Loguru мониторинг подтверждён (задача 9.5)

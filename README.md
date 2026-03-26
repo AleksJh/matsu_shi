@@ -147,5 +147,42 @@ matsu-shi/
 ```bash
 # Запускать локально на машине разработчика — не в Docker
 cd backend
+
+# Полный прогон с сохранением артефактов (рекомендуется при первом запуске):
+python scripts/ingest.py --path ./manuals/PC300-8.pdf --machine-model "PC300-8" --save-artifacts
+
+# Один файл, полный прогон без сохранения артефактов:
 python scripts/ingest.py --path ./manuals/PC300-8.pdf --machine-model "PC300-8"
+
+# Папка с PDF (machine model запрашивается интерактивно для каждого файла):
+python scripts/ingest.py --dir ./manuals/ --category hydraulics
+
+# Dry-run: парсинг и чанкинг без записи в БД и R2:
+python scripts/ingest.py --path ./manuals/PC300-8.pdf --machine-model "PC300-8" --dry-run
 ```
+
+### Контрольные точки (checkpoint) — Phase 8.7
+
+Артефакты хранятся в `cache/{sha256}/` и позволяют возобновить pipeline с любого шага
+без повторного запуска дорогих операций (Docling, Gemini Vision, enrichment, embedding).
+
+```bash
+# Остановиться после парсинга, проверить качество markdown:
+python scripts/ingest.py --path doc.pdf --machine-model "PC300-8" --stop-after parse
+# Инспектировать cache/{checksum}/parse.json ...
+# Продолжить с шага chunk:
+python scripts/ingest.py --path doc.pdf --machine-model "PC300-8" --start-from chunk
+
+# Переиндексировать с новой логикой чанкинга (parse+visual уже кешированы):
+python scripts/ingest.py --path doc.pdf --machine-model "PC300-8" --start-from chunk --rebuild-index
+
+# Кастомная директория артефактов:
+python scripts/ingest.py --path doc.pdf --machine-model "PC300-8" --save-artifacts --artifact-dir /data/cache
+```
+
+| Флаг | Описание |
+|------|---------|
+| `--stop-after {parse,chunk,enrich,embed}` | Сохранить артефакт и остановиться |
+| `--start-from {chunk,enrich,embed,write}` | Загрузить артефакт и продолжить |
+| `--save-artifacts` | Сохранять все артефакты при полном прогоне |
+| `--artifact-dir DIR` | Директория кеша (default: `./cache`) |
