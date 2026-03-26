@@ -2,6 +2,8 @@
 
 These tests are written BEFORE the implementation (TDD order).
 All tests must pass after step_enrich() is implemented in ingest.py.
+
+Import strategy: conftest.py stubs all heavy deps at collection time.
 """
 
 from __future__ import annotations
@@ -11,85 +13,31 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import scripts.ingest as _ingest_module
+from scripts.ingest import ChunkData, VisualTag, step_enrich
+
 
 # ---------------------------------------------------------------------------
-# Helpers — import target symbols without triggering heavy deps
+# Fixtures
 # ---------------------------------------------------------------------------
-
-def _import_ingest():
-    """Import step_enrich, ChunkData, VisualTag without loading heavy optional deps."""
-    import importlib.util
-    import pathlib
-    import sys
-
-    heavy_mods = [
-        "docling",
-        "docling.document_converter",
-        "boto3",
-        "pypdfium2",
-        "google",
-        "google.genai",
-        "PIL",
-        "PIL.Image",
-    ]
-    stubs: dict = {}
-    for mod in heavy_mods:
-        if mod not in sys.modules:
-            stubs[mod] = MagicMock()
-
-    with patch.dict(sys.modules, stubs):
-        app_stubs = {
-            "app.core.config": MagicMock(settings=MagicMock(
-                EMBED_DIM=1024,
-                EMBED_MODEL="test",
-                CF_R2_ENDPOINT="http://localhost",
-                CF_R2_ACCESS_KEY_ID="x",
-                CF_R2_SECRET_ACCESS_KEY="x",
-                CF_R2_BUCKET="b",
-                CF_R2_PUBLIC_BASE_URL="http://r2",
-                GEMINI_API_KEY="test-key",
-                LLM_ADVANCED_MODEL="gemini-test",
-            )),
-            "app.core.database": MagicMock(),
-            "app.models.document": MagicMock(),
-            "dotenv": MagicMock(),
-        }
-        with patch.dict(sys.modules, app_stubs):
-            # Remove cached module to force fresh import
-            for key in list(sys.modules):
-                if key.endswith("ingest") and "scripts" in key:
-                    del sys.modules[key]
-                    break
-
-            spec = importlib.util.spec_from_file_location(
-                "ingest",
-                pathlib.Path(__file__).resolve().parents[2] / "scripts" / "ingest.py",
-            )
-            mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-            # Must register before exec_module: PEP 563 (from __future__ import annotations)
-            # makes dataclass annotations strings; Python resolves them via sys.modules[cls.__module__]
-            sys.modules["ingest"] = mod
-            spec.loader.exec_module(mod)  # type: ignore[union-attr]
-            return mod
-
 
 @pytest.fixture(scope="module")
 def ingest_mod():
-    return _import_ingest()
+    return _ingest_module
 
 
 @pytest.fixture(scope="module")
-def step_enrich(ingest_mod):
+def step_enrich(ingest_mod):  # noqa: F811
     return ingest_mod.step_enrich
 
 
 @pytest.fixture(scope="module")
-def ChunkData(ingest_mod):
+def ChunkData(ingest_mod):  # noqa: F811
     return ingest_mod.ChunkData
 
 
 @pytest.fixture(scope="module")
-def VisualTag(ingest_mod):
+def VisualTag(ingest_mod):  # noqa: F811
     return ingest_mod.VisualTag
 
 

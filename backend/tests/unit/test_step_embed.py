@@ -6,6 +6,8 @@ Coverage:
   3. Dimension mismatch → sys.exit(1)
   4. embed_text returns None on one chunk → non-fatal, vector=None, rest continue
   5. dry_run=True → embed_text never called, vectors stay None
+
+Import strategy: conftest.py stubs all heavy deps at collection time.
 """
 
 from __future__ import annotations
@@ -16,80 +18,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import scripts.ingest as _ingest_module
+from scripts.ingest import ChunkData, step_embed
+
 
 # ---------------------------------------------------------------------------
-# Helpers — import target symbols without triggering heavy deps
+# Fixtures
 # ---------------------------------------------------------------------------
-
-
-def _import_ingest():
-    """Import step_embed, ChunkData without loading heavy optional deps."""
-    import importlib.util
-    import pathlib
-
-    heavy_mods = [
-        "docling",
-        "docling.document_converter",
-        "boto3",
-        "pypdfium2",
-        "google",
-        "google.genai",
-        "PIL",
-        "PIL.Image",
-    ]
-    stubs: dict = {}
-    for mod in heavy_mods:
-        if mod not in sys.modules:
-            stubs[mod] = MagicMock()
-
-    with patch.dict(sys.modules, stubs):
-        app_stubs = {
-            "app.core.config": MagicMock(
-                settings=MagicMock(
-                    EMBED_DIM=1024,
-                    EMBED_MODEL="qwen/qwen3-embedding-4b",
-                    OPENROUTER_API_KEY="test-key",
-                    CF_R2_ENDPOINT="http://localhost",
-                    CF_R2_ACCESS_KEY_ID="x",
-                    CF_R2_SECRET_ACCESS_KEY="x",
-                    CF_R2_BUCKET="b",
-                    CF_R2_PUBLIC_BASE_URL="http://r2",
-                    GEMINI_API_KEY="test-key",
-                    LLM_ADVANCED_MODEL="gemini-test",
-                )
-            ),
-            "app.core.database": MagicMock(),
-            "app.models.document": MagicMock(),
-            "dotenv": MagicMock(),
-        }
-        with patch.dict(sys.modules, app_stubs):
-            for key in list(sys.modules):
-                if key.endswith("ingest") and "scripts" in key:
-                    del sys.modules[key]
-                    break
-
-            spec = importlib.util.spec_from_file_location(
-                "ingest",
-                pathlib.Path(__file__).resolve().parents[2] / "scripts" / "ingest.py",
-            )
-            mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-            sys.modules["ingest"] = mod
-            spec.loader.exec_module(mod)  # type: ignore[union-attr]
-            return mod
-
 
 @pytest.fixture(scope="module")
 def ingest_mod():
-    return _import_ingest()
+    return _ingest_module
 
 
 @pytest.fixture(scope="module")
-def step_embed(ingest_mod):
+def step_embed(ingest_mod):  # noqa: F811
     return ingest_mod.step_embed
 
 
 @pytest.fixture(scope="module")
-def ChunkData(ingest_mod):
+def ChunkData(ingest_mod):  # noqa: F811
     return ingest_mod.ChunkData
 
 

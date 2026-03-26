@@ -3,6 +3,13 @@
 Heavy/optional dependencies are mocked at the sys.modules level so that
 `scripts.ingest` can be imported without them being installed.
 This must happen at collection time (conftest, not inside test functions).
+
+All test files in this directory use the simple import pattern:
+    from scripts.ingest import step_parse, ChunkData, ...
+
+App-level modules (app.core.config, app.core.database, app.models.*) are imported
+from the real project — the .env file provides all required settings. Only truly
+uninstallable optional deps (docling, pypdfium2) are stubbed here.
 """
 from __future__ import annotations
 

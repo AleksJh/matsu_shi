@@ -4,9 +4,11 @@ Tests are written BEFORE the implementation (TDD order).
 All tests must pass after step_write() is fully implemented in ingest.py.
 
 Strategy:
-  - Load ingest.py via importlib.util with all heavy external deps stubbed
+  - conftest.py stubs all heavy deps at collection time
   - Pass a real AsyncMock session; patch ingest_mod.pg_insert and ingest_mod.delete
   - Verify ORM interactions without hitting a real database
+
+Import strategy: conftest.py stubs all heavy deps at collection time.
 """
 
 from __future__ import annotations
@@ -17,67 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Helpers — load ingest.py without heavy deps
-# ---------------------------------------------------------------------------
-
-
-def _load_ingest():
-    """Import ingest module with all heavy / DB deps stubbed out."""
-    import importlib.util
-    import pathlib
-
-    heavy_mods = [
-        "docling",
-        "docling.document_converter",
-        "boto3",
-        "pypdfium2",
-        "google",
-        "google.genai",
-        "PIL",
-        "PIL.Image",
-    ]
-    stubs = {mod: MagicMock() for mod in heavy_mods if mod not in sys.modules}
-
-    app_stubs = {
-        "app.core.config": MagicMock(
-            settings=MagicMock(
-                EMBED_DIM=1024,
-                EMBED_MODEL="test",
-                CF_R2_ENDPOINT="http://localhost",
-                CF_R2_ACCESS_KEY_ID="x",
-                CF_R2_SECRET_ACCESS_KEY="x",
-                CF_R2_BUCKET="b",
-                CF_R2_PUBLIC_BASE_URL="http://r2",
-                GEMINI_API_KEY="x",
-                LLM_ADVANCED_MODEL="gemini",
-                DATABASE_URL="postgresql+asyncpg://u:p@localhost/db",
-            )
-        ),
-        "app.core.database": MagicMock(),
-        "app.models.document": MagicMock(),
-        "app.models.chunk": MagicMock(),
-        "dotenv": MagicMock(),
-    }
-
-    all_stubs = {**stubs, **app_stubs}
-
-    with patch.dict(sys.modules, all_stubs):
-        # Remove any previously cached ingest module
-        for key in list(sys.modules):
-            if "ingest" in key and "scripts" in key:
-                del sys.modules[key]
-        sys.modules.pop("ingest", None)
-
-        spec = importlib.util.spec_from_file_location(
-            "ingest",
-            pathlib.Path(__file__).resolve().parents[2] / "scripts" / "ingest.py",
-        )
-        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-        sys.modules["ingest"] = mod
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-        return mod
+import scripts.ingest as _ingest_module
+from scripts.ingest import ChunkData, ParseResult, step_write
 
 
 def run(coro):
@@ -86,21 +29,21 @@ def run(coro):
 
 @pytest.fixture(scope="module")
 def ingest_mod():
-    return _load_ingest()
+    return _ingest_module
 
 
 @pytest.fixture(scope="module")
-def ChunkData(ingest_mod):
+def ChunkData(ingest_mod):  # noqa: F811
     return ingest_mod.ChunkData
 
 
 @pytest.fixture(scope="module")
-def ParseResult(ingest_mod):
+def ParseResult(ingest_mod):  # noqa: F811
     return ingest_mod.ParseResult
 
 
 @pytest.fixture(scope="module")
-def step_write(ingest_mod):
+def step_write(ingest_mod):  # noqa: F811
     return ingest_mod.step_write
 
 

@@ -4,14 +4,25 @@ Usage (from backend/ directory):
     python scripts/ingest.py --path ./manual.pdf --machine-model "PC300-8"
     python scripts/ingest.py --dir ./manuals/ --category hydraulics
     python scripts/ingest.py --path ./manual.pdf --machine-model "PC300-8" --dry-run
+
+Checkpointing flags (Phase 8.7):
+    --stop-after {parse,chunk,enrich,embed}   save artifact and stop after this stage
+    --start-from {chunk,enrich,embed,write}   load artifact and resume from this stage
+    --save-artifacts                           save all intermediate artifacts (full run)
+    --artifact-dir DIR                         artifact cache directory (default: ./cache)
+
+Artifacts are stored as JSON in:
+    {artifact_dir}/{sha256_checksum}/{parse,visual,chunks,enriched,embedded}.json
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import hashlib
 import io
+import json
 import re
 import sys
 import time
@@ -311,6 +322,68 @@ def _merge_small_chunks(chunks: list[ChunkData], min_tokens: int) -> list[ChunkD
 
     # Reindex sequentially after merges
     return [dc_replace(c, chunk_index=i) for i, c in enumerate(merged)]
+
+
+# ---------------------------------------------------------------------------
+# Phase 8.7 — Artifact helpers (checkpoint system)
+# ---------------------------------------------------------------------------
+
+
+def _compute_checksum(pdf_path: Path) -> str:
+    """Compute SHA-256 checksum of a PDF file without running Docling.
+
+    Called once at the start of main() to locate the artifact cache directory.
+    Separate from step_parse() so checksum is available even when --start-from
+    skips the parse step entirely.
+    """
+    return hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+
+
+def _save_artifact(
+    artifact_dir: Path,
+    checksum: str,
+    stage: str,
+    data: object,
+) -> None:
+    """Serialize a dataclass or list[dataclass] to JSON and write to disk.
+
+    File location: {artifact_dir}/{checksum}/{stage}.json
+    Directory is created automatically if it does not exist.
+    """
+    dest = artifact_dir / checksum
+    dest.mkdir(parents=True, exist_ok=True)
+    if isinstance(data, list):
+        payload = [dataclasses.asdict(item) for item in data]
+    else:
+        payload = dataclasses.asdict(data)  # type: ignore[arg-type]
+    (dest / f"{stage}.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    logger.info(f"Артефакт сохранён: {dest / stage}.json")
+
+
+def _load_artifact(
+    artifact_dir: Path,
+    checksum: str,
+    stage: str,
+    cls: type,
+) -> object:
+    """Load a previously saved artifact from disk and reconstruct dataclass(es).
+
+    If the file does not exist, raises FileNotFoundError with a clear message
+    directing the user to re-run from an earlier stage.
+    """
+    path = artifact_dir / checksum / f"{stage}.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Артефакт не найден: {path}. "
+            f"Запустите pipeline с начала или с более раннего шага."
+        )
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(raw, list):
+        return [cls(**item) for item in raw]
+    return cls(**raw)
 
 
 # ---------------------------------------------------------------------------
@@ -692,9 +765,145 @@ def _prompt_machine_model(filename: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+async def _run_one_pdf(
+    pdf_path: Path,
+    machine_model: str,
+    args: argparse.Namespace,
+    artifact_dir: Path,
+) -> tuple[int, int, bool]:
+    """Run the ingestion pipeline for a single PDF, respecting checkpoint flags.
+
+    Returns (n_chunks, n_images, was_skipped).
+    """
+    start_from: str | None = getattr(args, "start_from", None)
+    stop_after: str | None = getattr(args, "stop_after", None)
+    save_artifacts: bool = getattr(args, "save_artifacts", False)
+
+    # Always compute checksum — fast (just hashing), no Docling needed.
+    checksum = _compute_checksum(pdf_path)
+
+    parse_result: ParseResult | None = None
+    visual_tags: list[VisualTag] = []
+    chunks: list[ChunkData] = []
+
+    # ------------------------------------------------------------------ #
+    # Determine entry point: default (full run) vs. start_from (resume)   #
+    # ------------------------------------------------------------------ #
+
+    if start_from is None:
+        # --- Full pipeline from Step 1 ---
+
+        # Step 1: Parse
+        parse_result = await step_parse(
+            pdf_path, machine_model, args.rebuild_index, dry_run=args.dry_run
+        )
+        if parse_result is None:
+            return 0, 0, True  # skipped (duplicate checksum)
+
+        if save_artifacts or stop_after == "parse":
+            _save_artifact(artifact_dir, checksum, "parse", parse_result)
+        if stop_after == "parse":
+            logger.success(f"Остановка после шага parse. Артефакт: {artifact_dir}/{checksum}/parse.json")
+            return 0, 0, False
+
+        # Steps 2 & 3: Run in parallel
+        async with asyncio.TaskGroup() as tg:
+            visual_task = tg.create_task(
+                step_visual_ingest(pdf_path, parse_result, machine_model, args.dry_run)
+            )
+            chunk_task = tg.create_task(
+                step_chunk(parse_result, machine_model, args.category, args.dry_run)
+            )
+        visual_tags = visual_task.result()
+        chunks = chunk_task.result()
+
+        if save_artifacts or stop_after == "chunk":
+            _save_artifact(artifact_dir, checksum, "visual", visual_tags)
+            _save_artifact(artifact_dir, checksum, "chunks", chunks)
+        if stop_after == "chunk":
+            logger.success(f"Остановка после шага chunk. Артефакты: {artifact_dir}/{checksum}/")
+            return len(chunks), len(visual_tags), False
+
+    elif start_from == "chunk":
+        # Load parse + visual from cache, run steps 3–6
+        logger.info(f"[checkpoint] Загрузка parse + visual из {artifact_dir}/{checksum}/")
+        parse_result = _load_artifact(artifact_dir, checksum, "parse", ParseResult)  # type: ignore[assignment]
+        visual_tags = _load_artifact(artifact_dir, checksum, "visual", VisualTag)  # type: ignore[assignment]
+        chunks = await step_chunk(parse_result, machine_model, args.category, args.dry_run)
+
+        if save_artifacts or stop_after == "chunk":
+            _save_artifact(artifact_dir, checksum, "chunks", chunks)
+        if stop_after == "chunk":
+            logger.success(f"Остановка после шага chunk. Артефакт: {artifact_dir}/{checksum}/chunks.json")
+            return len(chunks), len(visual_tags), False
+
+    elif start_from in ("enrich", "embed", "write"):
+        # Load parse + visual for metadata; actual chunk data comes from stage-specific artifact
+        logger.info(f"[checkpoint] Загрузка артефактов из {artifact_dir}/{checksum}/")
+        parse_result = _load_artifact(artifact_dir, checksum, "parse", ParseResult)  # type: ignore[assignment]
+        visual_tags = _load_artifact(artifact_dir, checksum, "visual", VisualTag)  # type: ignore[assignment]
+
+    else:
+        logger.error(f"Неизвестный --start-from: {start_from}")
+        sys.exit(1)
+
+    # ------------------------------------------------------------------ #
+    # Step 4: Contextual enrichment                                        #
+    # ------------------------------------------------------------------ #
+    doc_name: str = parse_result.doc_name  # type: ignore[union-attr]
+
+    if start_from not in ("embed", "write"):
+        if start_from == "enrich":
+            chunks = _load_artifact(artifact_dir, checksum, "chunks", ChunkData)  # type: ignore[assignment]
+        chunks = await step_enrich(
+            chunks, doc_name, machine_model, visual_tags, dry_run=args.dry_run
+        )
+        if save_artifacts or stop_after == "enrich":
+            _save_artifact(artifact_dir, checksum, "enriched", chunks)
+        if stop_after == "enrich":
+            logger.success(f"Остановка после шага enrich. Артефакт: {artifact_dir}/{checksum}/enriched.json")
+            return len(chunks), len(visual_tags), False
+    else:
+        # Reload enriched or embedded artifact
+        artifact_stage = "enriched" if start_from == "embed" else "embedded"
+        chunks = _load_artifact(artifact_dir, checksum, artifact_stage, ChunkData)  # type: ignore[assignment]
+
+    # ------------------------------------------------------------------ #
+    # Step 5: Embedding                                                    #
+    # ------------------------------------------------------------------ #
+
+    if start_from != "write":
+        chunks = await step_embed(chunks, dry_run=args.dry_run)
+        if save_artifacts or stop_after == "embed":
+            _save_artifact(artifact_dir, checksum, "embedded", chunks)
+        if stop_after == "embed":
+            logger.success(f"Остановка после шага embed. Артефакт: {artifact_dir}/{checksum}/embedded.json")
+            return len(chunks), len(visual_tags), False
+
+    # ------------------------------------------------------------------ #
+    # Step 6: Remote write                                                 #
+    # ------------------------------------------------------------------ #
+
+    if args.dry_run:
+        logger.info("dry-run: пропуск записи в БД и R2")
+    else:
+        async with AsyncSessionLocal() as session:
+            await step_write(
+                chunks, parse_result, machine_model,  # type: ignore[arg-type]
+                args.category, args.rebuild_index, session,
+            )
+
+    return len(chunks), len(visual_tags), False
+
+
 async def main(args: argparse.Namespace) -> None:
-    """Run the full ingestion pipeline for one or more PDF files."""
+    """Run the ingestion pipeline for one or more PDF files.
+
+    Supports checkpoint flags: --stop-after, --start-from, --save-artifacts.
+    """
     start = time.monotonic()
+
+    artifact_dir = Path(getattr(args, "artifact_dir", "./cache"))
 
     pdf_paths: list[Path]
     if args.path:
@@ -713,7 +922,6 @@ async def main(args: argparse.Namespace) -> None:
     for pdf_path in pdf_paths:
         logger.info(f"=== Обработка: {pdf_path.name} ===")
 
-        # In --dir mode, prompt for machine_model per file interactively
         machine_model: str
         if args.dir:
             machine_model = _prompt_machine_model(pdf_path.name)
@@ -722,55 +930,24 @@ async def main(args: argparse.Namespace) -> None:
 
         file_start = time.monotonic()
 
-        # Step 1: Parse
-        parse_result = await step_parse(
-            pdf_path, machine_model, args.rebuild_index, dry_run=args.dry_run
+        n_chunks, n_images, was_skipped = await _run_one_pdf(
+            pdf_path, machine_model, args, artifact_dir
         )
 
-        # None means file was skipped (duplicate checksum)
-        if parse_result is None:
+        if was_skipped:
             skipped += 1
             continue
 
-        doc_name: str = parse_result.doc_name
-
-        # Steps 2 & 3: Run in parallel (visual ingestion + chunking)
-        async with asyncio.TaskGroup() as tg:
-            visual_task = tg.create_task(
-                step_visual_ingest(pdf_path, parse_result, machine_model, args.dry_run)
-            )
-            chunk_task = tg.create_task(
-                step_chunk(parse_result, machine_model, args.category, args.dry_run)
-            )
-        visual_tags: list[VisualTag] = visual_task.result()
-        chunks = chunk_task.result()
-
-        # Step 4: Contextual enrichment (visual_tags from step 2 applied here)
-        chunks = await step_enrich(chunks, doc_name, machine_model, visual_tags, dry_run=args.dry_run)
-
-        # Step 5: Embedding
-        chunks = await step_embed(chunks, dry_run=args.dry_run)
-
-        # Step 6: Remote write (skipped in dry-run)
-        if args.dry_run:
-            logger.info("dry-run: пропуск записи в БД и R2")
-        else:
-            async with AsyncSessionLocal() as session:
-                await step_write(
-                    chunks, parse_result, machine_model,
-                    args.category, args.rebuild_index, session,
-                )
-
-        file_elapsed = time.monotonic() - file_start
-        n_chunks = len(chunks)
-        m_images = len(visual_tags)
         total_chunks += n_chunks
-        total_images += m_images
+        total_images += n_images
+        file_elapsed = time.monotonic() - file_start
 
         dry_run_suffix = " (dry-run)" if args.dry_run else ""
+        stop_after = getattr(args, "stop_after", None)
+        stop_suffix = f" [остановлено после: {stop_after}]" if stop_after else ""
         logger.success(
-            f"Индексировано: {n_chunks} чанков, {m_images} изображений, "
-            f"документ: {doc_name}, время: {file_elapsed:.1f}с{dry_run_suffix}"
+            f"Завершено: {n_chunks} чанков, {n_images} изображений, "
+            f"документ: {pdf_path.stem}, время: {file_elapsed:.1f}с{dry_run_suffix}{stop_suffix}"
         )
 
     if len(pdf_paths) > 1:
@@ -832,6 +1009,43 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Разбор и чанкинг без записи в БД и Cloudflare R2",
     )
+
+    # --- Phase 8.7: Checkpoint flags ---
+    checkpoint = parser.add_argument_group("checkpoint (Phase 8.7)")
+    checkpoint.add_argument(
+        "--stop-after",
+        choices=["parse", "chunk", "enrich", "embed"],
+        default=None,
+        metavar="STAGE",
+        help=(
+            "Сохранить артефакт и остановиться после указанного шага. "
+            "Допустимые значения: parse, chunk, enrich, embed."
+        ),
+    )
+    checkpoint.add_argument(
+        "--start-from",
+        choices=["chunk", "enrich", "embed", "write"],
+        default=None,
+        metavar="STAGE",
+        help=(
+            "Загрузить артефакт из кеша и возобновить pipeline с указанного шага. "
+            "Допустимые значения: chunk, enrich, embed, write. "
+            "Требует предварительного запуска с --stop-after или --save-artifacts."
+        ),
+    )
+    checkpoint.add_argument(
+        "--save-artifacts",
+        action="store_true",
+        default=False,
+        help="Сохранить все промежуточные артефакты при полном прогоне (для инспекции и повтора).",
+    )
+    checkpoint.add_argument(
+        "--artifact-dir",
+        default="./cache",
+        metavar="DIR",
+        help="Директория для хранения артефактов (default: ./cache).",
+    )
+
     return parser
 
 

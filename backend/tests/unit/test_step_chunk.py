@@ -2,6 +2,9 @@
 
 These tests are written BEFORE the implementation (TDD order).
 All tests must pass after step_chunk() is implemented in ingest.py.
+
+Import strategy: conftest.py stubs heavy deps (docling, boto3, etc.) at collection
+time, so we can use simple top-level imports here — same pattern as test_step_parse.py.
 """
 
 from __future__ import annotations
@@ -11,95 +14,37 @@ from typing import Any
 
 import pytest
 
+from scripts.ingest import (  # noqa: E402
+    ChunkData,
+    ParseResult,
+    _merge_small_chunks,
+    dc_replace,
+    step_chunk,
+)
+
 
 # ---------------------------------------------------------------------------
-# Helpers — import target symbols without triggering heavy deps
+# Module-level aliases exposed as fixtures for backward compatibility
 # ---------------------------------------------------------------------------
-
-def _import_step_chunk():
-    """Import step_chunk and ChunkData without loading heavy optional deps."""
-    import importlib
-    import sys
-    from unittest.mock import MagicMock, patch
-
-    # Stub out heavy imports that are not needed for unit tests
-    heavy_mods = [
-        "docling",
-        "docling.document_converter",
-        "boto3",
-        "pypdfium2",
-        "google",
-        "google.genai",
-        "PIL",
-        "PIL.Image",
-    ]
-    stubs = {}
-    for mod in heavy_mods:
-        if mod not in sys.modules:
-            stubs[mod] = MagicMock()
-
-    with patch.dict(sys.modules, stubs):
-        # Also stub app modules that hit DB / settings
-        app_stubs = {
-            "app.core.config": MagicMock(settings=MagicMock(
-                EMBED_DIM=1024,
-                EMBED_MODEL="test",
-                CF_R2_ENDPOINT="http://localhost",
-                CF_R2_ACCESS_KEY_ID="x",
-                CF_R2_SECRET_ACCESS_KEY="x",
-                CF_R2_BUCKET="b",
-                CF_R2_PUBLIC_BASE_URL="http://r2",
-                GEMINI_API_KEY="x",
-                LLM_ADVANCED_MODEL="gemini",
-                LLM_LITE_MODEL="gemini-lite",
-                CHUNK_MIN_TOKENS=80,
-            )),
-            "app.core.database": MagicMock(),
-            "app.models.document": MagicMock(),
-            "dotenv": MagicMock(),
-        }
-        with patch.dict(sys.modules, app_stubs):
-            # Remove cached module to force fresh import each time (idempotent)
-            ingest_key = None
-            for key in list(sys.modules):
-                if key.endswith("ingest") and "scripts" in key:
-                    ingest_key = key
-                    break
-            if ingest_key:
-                del sys.modules[ingest_key]
-
-            import importlib.util
-            import pathlib
-
-            spec = importlib.util.spec_from_file_location(
-                "ingest",
-                pathlib.Path(__file__).resolve().parents[2] / "scripts" / "ingest.py",
-            )
-            mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-            # Must register before exec_module: PEP 563 (from __future__ import annotations)
-            # makes dataclass annotations strings; Python resolves them via sys.modules[cls.__module__]
-            sys.modules["ingest"] = mod
-            spec.loader.exec_module(mod)  # type: ignore[union-attr]
-            return mod
-
 
 @pytest.fixture(scope="module")
 def ingest_mod():
-    return _import_step_chunk()
+    import scripts.ingest as _mod
+    return _mod
 
 
 @pytest.fixture(scope="module")
-def step_chunk(ingest_mod):
+def step_chunk(ingest_mod):  # noqa: F811 — shadows the import intentionally
     return ingest_mod.step_chunk
 
 
 @pytest.fixture(scope="module")
-def ChunkData(ingest_mod):
+def ChunkData(ingest_mod):  # noqa: F811
     return ingest_mod.ChunkData
 
 
 @pytest.fixture(scope="module")
-def ParseResult(ingest_mod):
+def ParseResult(ingest_mod):  # noqa: F811
     return ingest_mod.ParseResult
 
 
@@ -142,15 +87,18 @@ class TestRule1HeadingBoundary:
         assert len(text_chunks) >= 1
 
     def test_two_headings_create_separate_chunks(self, step_chunk, ParseResult):
+        # Content must exceed CHUNK_MIN_TOKENS (80) so _merge_small_chunks keeps both
+        words_one = " ".join([f"word{i}" for i in range(90)])
+        words_two = " ".join([f"term{i}" for i in range(90)])
         md = (
-            "# Section One\n\nText for section one.\n\n"
-            "# Section Two\n\nText for section two.\n"
+            f"# Section One\n\n{words_one}\n\n"
+            f"# Section Two\n\n{words_two}\n"
         )
         pr = make_parse_result(ParseResult, md)
         chunks = run(step_chunk(pr, "PC300-8", None, dry_run=True))
 
         text_chunks = [c for c in chunks if c.chunk_type == "text"]
-        # Each heading spawns its own chunk
+        # Each heading spawns its own chunk (content is large enough to survive merge)
         assert len(text_chunks) >= 2
 
     def test_section_title_recorded(self, step_chunk, ParseResult):
@@ -164,9 +112,12 @@ class TestRule1HeadingBoundary:
         ), f"section_titles found: {[c.section_title for c in text_chunks]}"
 
     def test_h4_heading_is_boundary(self, step_chunk, ParseResult):
+        # Content must exceed CHUNK_MIN_TOKENS (80) so _merge_small_chunks keeps both
+        words_a = " ".join([f"step_a_word{i}" for i in range(90)])
+        words_b = " ".join([f"step_b_word{i}" for i in range(90)])
         md = (
-            "#### Step A\n\nDo step A.\n\n"
-            "#### Step B\n\nDo step B.\n"
+            f"#### Step A\n\n{words_a}\n\n"
+            f"#### Step B\n\n{words_b}\n"
         )
         pr = make_parse_result(ParseResult, md)
         chunks = run(step_chunk(pr, "WB97S-5", None, dry_run=True))
@@ -282,9 +233,9 @@ class TestRule3VisualRefsEmpty:
 class TestRule4Overlap:
     def test_second_text_chunk_starts_with_overlap(self, step_chunk, ParseResult):
         """Second text chunk must start with tail words from the first."""
-        # Create two clearly separated text sections
-        words_a = " ".join([f"word{i}" for i in range(50)])  # 50 words → ~5 word overlap
-        words_b = " ".join([f"term{i}" for i in range(30)])
+        # Both sections must exceed CHUNK_MIN_TOKENS (80) to survive _merge_small_chunks
+        words_a = " ".join([f"word{i}" for i in range(90)])
+        words_b = " ".join([f"term{i}" for i in range(90)])
         md = f"# Section A\n\n{words_a}\n\n# Section B\n\n{words_b}\n"
         pr = make_parse_result(ParseResult, md)
         chunks = run(step_chunk(pr, "PC300-8", None, dry_run=True))
@@ -407,7 +358,6 @@ class TestMergeSmallChunks:
     """Tests for the _merge_small_chunks() helper (PRD Phase 9 improvement)."""
 
     def _make_text_chunk(self, ChunkData, content: str, index: int = 0) -> object:
-        from app.rag.embedder import embed_text  # noqa: F401 (not actually imported)
         return ChunkData(
             chunk_index=index,
             content=content,
