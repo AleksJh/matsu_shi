@@ -1,7 +1,10 @@
+# PDF samples should never be baked into the image
+scripts/samples/
+
+# Test artifacts and cache
+tests/
 .venv/
 __pycache__/
 *.pyc
-*.pyo
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
+cache/
