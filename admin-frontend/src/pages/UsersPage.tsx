@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { listUsers, updateUserStatus, UserItem } from '../api/users'
 
+
 type StatusFilter = 'pending' | 'active' | 'denied' | 'banned' | undefined
 
 const FILTERS: { label: string; value: StatusFilter }[] = [
@@ -68,20 +69,16 @@ export default function UsersPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(undefined)
   const [page, setPage] = useState(1)
   const [items, setItems] = useState<UserItem[]>([])
-  const [total, setTotal] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<number | null>(null)
-
-  const totalPages = Math.max(1, Math.ceil(total / LIMIT))
 
   const fetchUsers = useCallback(async (filter: StatusFilter, p: number) => {
     setIsLoading(true)
     setError(null)
     try {
-      const res = await listUsers(filter, p, LIMIT)
-      setItems(res.items)
-      setTotal(res.total)
+      const data = await listUsers(filter, p, LIMIT)
+      setItems(data)
     } catch {
       setError('Не удалось загрузить список пользователей.')
     } finally {
@@ -207,17 +204,14 @@ export default function UsersPage() {
         >
           Назад
         </button>
-        <span>
-          Страница {page} из {totalPages}
-        </span>
+        <span>Страница {page}</span>
         <button
-          disabled={page >= totalPages || isLoading}
+          disabled={items.length < LIMIT || isLoading}
           onClick={() => setPage((p) => p + 1)}
           className="px-3 py-1.5 rounded border border-gray-300 hover:border-blue-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           Вперёд
         </button>
-        <span className="text-gray-400">Всего: {total}</span>
       </div>
     </div>
   )

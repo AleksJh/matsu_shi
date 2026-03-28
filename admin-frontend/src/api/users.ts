@@ -10,21 +10,14 @@ export interface UserItem {
   query_count: number
 }
 
-export interface UsersResponse {
-  items: UserItem[]
-  total: number
-  page: number
-  limit: number
-}
-
 export async function listUsers(
   status?: string,
   page = 1,
   limit = 20,
-): Promise<UsersResponse> {
-  const params: Record<string, string | number> = { page, limit }
+): Promise<UserItem[]> {
+  const params: Record<string, string | number> = { limit, offset: (page - 1) * limit }
   if (status) params.status = status
-  const { data } = await apiClient.get<UsersResponse>('/api/v1/admin/users', { params })
+  const { data } = await apiClient.get<UserItem[]>('/api/v1/admin/users', { params })
   return data
 }
 
