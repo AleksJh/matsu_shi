@@ -2,7 +2,7 @@
 
 **Фаза:** 9 — Pilot & Tuning
 **Задача:** 9.1 — Ingest Real Documents
-**Статус:** ⏳ не начата
+**Статус:** 🔄 в процессе
 
 ---
 
@@ -36,7 +36,12 @@
 
 ## Files to Modify
 
-Нет изменений кода. При необходимости корректируются только:
+- `backend/scripts/ingest.py` — отключён OCR (`do_ocr=False`) для предотвращения краша pypdfium2
+  на сложных страницах цифровых PDF. Добавлены импорты `PdfPipelineOptions`, `PdfFormatOption`, `InputFormat`.
+- `docker-compose.prod.yml` — добавлен port mapping `127.0.0.1:5432:5432` для сервиса `postgres`
+  (необходим для SSH-туннеля при локальном запуске ingest).
+
+При необходимости также корректируется:
 - `.env` на VPS (пороги `RETRIEVAL_SCORE_THRESHOLD`, `RETRIEVAL_NO_ANSWER_THRESHOLD` — задача 9.3)
 
 ---
@@ -64,25 +69,33 @@
 
 ### Запуск ingest.py (локально, не в Docker)
 
+Требования перед запуском:
+1. SSH-туннель открыт: `ssh -L 5432:localhost:5432 matsu -N` (терминал должен "висеть")
+2. CWD = `backend/`
+
 ```bash
 cd backend
 
 # Первый прогон — сохранить все артефакты для возможного возобновления:
-python scripts/ingest.py \
+DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/matsu_shi" \
+PYTHONPATH=/path/to/matsu_shi/backend \
+python -m uv run python scripts/ingest.py \
   --path ./scripts/samples/<manual>.pdf \
   --machine-model "PC300-8" \
-  --category "hydraulics" \
+  --category "maintenance" \
   --save-artifacts
 
 # Если нужно перечитать только chunking (parse+visual уже в cache):
-python scripts/ingest.py \
+DATABASE_URL="..." PYTHONPATH=... \
+python -m uv run python scripts/ingest.py \
   --path ./scripts/samples/<manual>.pdf \
   --machine-model "PC300-8" \
   --start-from chunk \
   --rebuild-index
 
 # Dry-run для проверки без записи в БД и R2:
-python scripts/ingest.py \
+DATABASE_URL="..." PYTHONPATH=... \
+python -m uv run python scripts/ingest.py \
   --path ./scripts/samples/<manual>.pdf \
   --machine-model "PC300-8" \
   --dry-run

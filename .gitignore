@@ -61,3 +61,13 @@ Thumbs.db
 # Confidential Samples
 backend/scripts/samples/*.pdf
 backend/scripts/samples/*.PDF
+
+# Cache directories
+cache/
+
+# SQLite
+*.db
+*.sqlite3
+
+# Local Claude settings
+.claude/settings.local.json

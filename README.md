@@ -144,22 +144,47 @@ matsu-shi/
 
 ## Инструмент для загрузки PDF (локально)
 
+Ingest pipeline запускается **локально на машине разработчика** (не в Docker на VPS).
+Шаги 1–5 (parse → embed) выполняются локально; шаг 6 (write) пишет напрямую в VPS PostgreSQL
+через SSH-туннель и в Cloudflare R2 по HTTPS.
+
+### Подготовка
+
 ```bash
-# Запускать локально на машине разработчика — не в Docker
+# 1. Открыть SSH-туннель к VPS PostgreSQL (держать терминал открытым):
+ssh -L 5432:localhost:5432 matsu -N
+# Терминал "зависнет" без вывода — это нормально, туннель активен.
+
+# 2. В новом терминале запустить ingest:
 cd backend
+```
 
+### Основные команды
+
+```bash
 # Полный прогон с сохранением артефактов (рекомендуется при первом запуске):
-python scripts/ingest.py --path ./manuals/PC300-8.pdf --machine-model "PC300-8" --save-artifacts
-
-# Один файл, полный прогон без сохранения артефактов:
-python scripts/ingest.py --path ./manuals/PC300-8.pdf --machine-model "PC300-8"
-
-# Папка с PDF (machine model запрашивается интерактивно для каждого файла):
-python scripts/ingest.py --dir ./manuals/ --category hydraulics
+DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/matsu_shi" \
+PYTHONPATH=/path/to/matsu_shi/backend \
+python -m uv run python scripts/ingest.py \
+  --path ./scripts/samples/manual.pdf \
+  --machine-model "PC300-8" \
+  --category "maintenance" \
+  --save-artifacts
 
 # Dry-run: парсинг и чанкинг без записи в БД и R2:
-python scripts/ingest.py --path ./manuals/PC300-8.pdf --machine-model "PC300-8" --dry-run
+DATABASE_URL="..." PYTHONPATH=... \
+python -m uv run python scripts/ingest.py \
+  --path ./scripts/samples/manual.pdf \
+  --machine-model "PC300-8" \
+  --dry-run
 ```
+
+> **Почему `DATABASE_URL` передаётся явно?** pydantic-settings может подхватить `.env` из
+> родительского каталога с `DATABASE_URL=postgres:5432` (Docker-адрес). Явный override гарантирует
+> что используется `localhost:5432` (SSH-туннель).
+>
+> **Почему `PYTHONPATH`?** `scripts/ingest.py` импортирует `app.*` — модули backend. Python
+> должен знать где их искать.
 
 ### Контрольные точки (checkpoint) — Phase 8.7
 
@@ -168,16 +193,21 @@ python scripts/ingest.py --path ./manuals/PC300-8.pdf --machine-model "PC300-8" 
 
 ```bash
 # Остановиться после парсинга, проверить качество markdown:
-python scripts/ingest.py --path doc.pdf --machine-model "PC300-8" --stop-after parse
+DATABASE_URL="..." PYTHONPATH=... \
+python -m uv run python scripts/ingest.py \
+  --path doc.pdf --machine-model "PC300-8" --stop-after parse
+
 # Инспектировать cache/{checksum}/parse.json ...
+
 # Продолжить с шага chunk:
-python scripts/ingest.py --path doc.pdf --machine-model "PC300-8" --start-from chunk
+DATABASE_URL="..." PYTHONPATH=... \
+python -m uv run python scripts/ingest.py \
+  --path doc.pdf --machine-model "PC300-8" --start-from chunk
 
 # Переиндексировать с новой логикой чанкинга (parse+visual уже кешированы):
-python scripts/ingest.py --path doc.pdf --machine-model "PC300-8" --start-from chunk --rebuild-index
-
-# Кастомная директория артефактов:
-python scripts/ingest.py --path doc.pdf --machine-model "PC300-8" --save-artifacts --artifact-dir /data/cache
+DATABASE_URL="..." PYTHONPATH=... \
+python -m uv run python scripts/ingest.py \
+  --path doc.pdf --machine-model "PC300-8" --start-from chunk --rebuild-index
 ```
 
 | Флаг | Описание |
@@ -186,3 +216,9 @@ python scripts/ingest.py --path doc.pdf --machine-model "PC300-8" --save-artifac
 | `--start-from {chunk,enrich,embed,write}` | Загрузить артефакт и продолжить |
 | `--save-artifacts` | Сохранять все артефакты при полном прогоне |
 | `--artifact-dir DIR` | Директория кеша (default: `./cache`) |
+
+### Примечания по парсингу
+
+- OCR отключён (`do_ocr=False`) — сервисные мануалы Komatsu являются цифровыми PDF с текстовым
+  слоем. OCR не нужен и при включении вызывает краш pypdfium2 на сложных страницах (`std::bad_alloc`).
+- При первом запуске docling скачивает модели (~40MB) из modelscope.cn — нужен интернет.

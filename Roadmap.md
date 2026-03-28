@@ -442,6 +442,12 @@
 - Verify Loguru logs are readable in `docker compose logs backend`.
 - Verify admin `/stats` command in Telegram returns accurate numbers.
 
+### ⏳ 9.6 Gemini 503 Retry in RAG Agent
+- `ClassifierAgent` and `ResponderAgent` (Pydantic AI) call Gemini at query time and are currently unprotected against 503 UNAVAILABLE spikes.
+- Add retry logic matching the ingest pipeline standard: 20 attempts, 2s flat wait, only on 503 errors.
+- Apply to all Gemini call sites used at inference time: `classifier.py`, `responder.py`, and `embedder.py` (OpenRouter may also return 503).
+- Ensure retries are transparent to the SSE stream — the client should not receive a partial or error response due to a transient API spike.
+
 **Phase 9 Done When:** All PRD §13 verification tests pass; at least 50 real queries have been processed without hallucinations or missing citations.
 
 ---

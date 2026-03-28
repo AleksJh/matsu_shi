@@ -37,7 +37,9 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 import tiktoken  # noqa: E402
 import boto3  # noqa: E402
 import pypdfium2 as pdfium  # noqa: E402
-from docling.document_converter import DocumentConverter  # noqa: E402
+from docling.datamodel.base_models import InputFormat  # noqa: E402
+from docling.datamodel.pipeline_options import PdfPipelineOptions  # noqa: E402
+from docling.document_converter import DocumentConverter, PdfFormatOption  # noqa: E402
 from google import genai  # noqa: E402
 from loguru import logger  # noqa: E402
 from PIL import Image  # noqa: E402
@@ -130,26 +132,61 @@ async def step_parse(
                 )
                 return None
 
-    # 3. Docling parse (synchronous CPU-bound call; acceptable in local CLI context)
-    converter = DocumentConverter()
-    result = converter.convert(str(pdf_path))
+    # 3. Docling parse in 60-page chunks to avoid pypdfium2 heap corruption.
+    # Large PDFs cause std::bad_alloc errors on many pages; after ~100 accumulated
+    # failures the C++ heap corrupts and segfaults. Each 60-page temp PDF starts a
+    # fresh pypdfium2 document context, so at most a handful of bad_allocs accumulate
+    # before the context is discarded — well within docling's graceful-recovery limit.
+    # OCR is also disabled: manuals have embedded text layers and OCR is not needed.
+    _CHUNK_SIZE = 60
+    _pdf_opts = PdfPipelineOptions(do_ocr=False)
+    converter = DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=_pdf_opts)}
+    )
 
-    # 4. Extract Markdown — preserves H1–H4 hierarchy and tables
-    markdown = result.document.export_to_markdown()
+    from pypdf import PdfReader, PdfWriter  # noqa: E402
+    import tempfile  # noqa: E402
 
-    # 5. Collect visual page metadata using Docling v2 API
+    _reader = PdfReader(str(pdf_path))
+    _total_pages = len(_reader.pages)
+    _chunk_starts = list(range(0, _total_pages, _CHUNK_SIZE))
+
+    _markdown_parts: list[str] = []
     figure_pages: list[dict] = []
-    for pic in result.document.pictures:
-        if pic.prov:
-            prov = pic.prov[0]
-            bbox = (
-                {"l": prov.bbox.l, "t": prov.bbox.t, "r": prov.bbox.r, "b": prov.bbox.b}
-                if prov.bbox
-                else None
-            )
-            figure_pages.append({"page_number": prov.page_no, "bbox": bbox})
 
-    page_count = len(result.document.pages)
+    with tempfile.TemporaryDirectory() as _tmpdir:
+        for _ci, _cs in enumerate(_chunk_starts):
+            _ce = min(_cs + _CHUNK_SIZE, _total_pages)
+            logger.info(
+                f"[1/6] Чанк {_ci + 1}/{len(_chunk_starts)}: "
+                f"страницы {_cs + 1}–{_ce} из {_total_pages} ..."
+            )
+            _writer = PdfWriter()
+            for _pg in _reader.pages[_cs:_ce]:
+                _writer.add_page(_pg)
+            _chunk_path = Path(_tmpdir) / f"chunk_{_ci:04d}.pdf"
+            with open(_chunk_path, "wb") as _f:
+                _writer.write(_f)
+
+            _chunk_result = converter.convert(str(_chunk_path))
+
+            _markdown_parts.append(_chunk_result.document.export_to_markdown())
+
+            for pic in _chunk_result.document.pictures:
+                if pic.prov:
+                    prov = pic.prov[0]
+                    bbox = (
+                        {"l": prov.bbox.l, "t": prov.bbox.t, "r": prov.bbox.r, "b": prov.bbox.b}
+                        if prov.bbox
+                        else None
+                    )
+                    # prov.page_no is 1-based within the chunk; map to absolute page number
+                    figure_pages.append({"page_number": _cs + prov.page_no, "bbox": bbox})
+
+    # 4. Combine markdown from all chunks
+    markdown = "\n\n".join(_markdown_parts)
+
+    page_count = _total_pages
     logger.success(
         f"[1/6] Парсинг завершён: {pdf_path.name} — {page_count} стр., "
         f"{len(figure_pages)} рисунков, {len(markdown)} символов Markdown"
@@ -170,6 +207,7 @@ async def step_visual_ingest(
     parse_result: ParseResult,
     machine_model: str,
     dry_run: bool,
+    partial_path: Path | None = None,
 ) -> list[VisualTag]:
     """Step 2: Render diagram pages → WebP → Cloudflare R2 → Gemini description.
 
@@ -181,6 +219,10 @@ async def step_visual_ingest(
 
     Per-page errors are non-fatal: logged as WARNING, processing continues.
     Runs in parallel with step_chunk via asyncio.TaskGroup.
+
+    If partial_path is provided, progress is saved after every page so the step
+    can be resumed after a crash or API limit without repeating paid API calls.
+    On resume, already-processed pages are skipped automatically.
     """
     figure_pages = parse_result.figure_pages
     logger.info(f"[2/6] Visual ingest: {len(figure_pages)} figure pages found")
@@ -198,6 +240,19 @@ async def step_visual_ingest(
         logger.success("[2/6] Visual ingest complete: 0 images uploaded (dry-run)")
         return visual_tags
 
+    # Resume from partial progress if available
+    done_pages: set[int] = set()
+    if partial_path is not None and partial_path.exists():
+        try:
+            raw = json.loads(partial_path.read_text(encoding="utf-8"))
+            visual_tags = [VisualTag(**item) for item in raw]
+            done_pages = {t.page_number for t in visual_tags}
+            logger.info(f"[2/6] Resuming visual ingest: {len(done_pages)} pages already done, skipping")
+        except Exception as exc:
+            logger.warning(f"[2/6] Не удалось загрузить partial progress ({exc}), начинаем с нуля")
+            visual_tags = []
+            done_pages = set()
+
     # Set up clients once for the entire document
     s3 = boto3.client(
         "s3",
@@ -208,9 +263,13 @@ async def step_visual_ingest(
     gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
     pdf = pdfium.PdfDocument(str(pdf_path))
 
+    seen_pages: set[int] = set(done_pages)
     try:
         for fig in figure_pages:
             page_number: int = fig["page_number"]
+            if page_number in seen_pages:
+                continue
+            seen_pages.add(page_number)
             try:
                 # 1. Render page to WebP (DPI=150; pypdfium2 base is 72 DPI)
                 page = pdf[page_number - 1]  # 0-indexed
@@ -231,27 +290,60 @@ async def step_visual_ingest(
                 r2_url = f"{settings.CF_R2_PUBLIC_BASE_URL}/{key}"
                 logger.debug(f"  Uploaded page_{page_number}.webp → {r2_url}")
 
-                # 3. Describe via Gemini Vision
+                # 3. Describe via Gemini Vision (retry up to 3x on 503)
                 img = Image.open(io.BytesIO(webp_bytes))
-                response = gemini_client.models.generate_content(
-                    model=settings.LLM_ADVANCED_MODEL,
-                    contents=[  # type: ignore[arg-type]  # PIL.Image accepted at runtime
-                        "Опиши техническую схему: компоненты, стрелки, метки. "
-                        "Одна строка технического описания на русском.",
-                        img,
-                    ],
-                )
-                description = (response.text or "").strip()
+                description = ""
+                for _attempt in range(20):
+                    try:
+                        response = gemini_client.models.generate_content(
+                            model=settings.LLM_ADVANCED_MODEL,
+                            contents=[  # type: ignore[arg-type]  # PIL.Image accepted at runtime
+                                "Опиши техническую схему: компоненты, стрелки, метки. "
+                                "Одна строка технического описания на русском.",
+                                img,
+                            ],
+                        )
+                        description = (response.text or "").strip()
+                        break
+                    except Exception as _exc:
+                        if _attempt < 19 and "503" in str(_exc):
+                            _wait = 2
+                            logger.warning(
+                                f"  Gemini 503 на странице {page_number}, "
+                                f"попытка {_attempt + 1}/20, ждём {_wait}s ..."
+                            )
+                            await asyncio.sleep(_wait)
+                        else:
+                            raise
                 logger.info(f"  page_{page_number}: {description}")
 
                 visual_tags.append(
                     VisualTag(page_number=page_number, r2_url=r2_url, description=description)
                 )
+
+                # Save incremental progress after each successful page
+                if partial_path is not None:
+                    partial_path.write_text(
+                        json.dumps(
+                            [dataclasses.asdict(t) for t in visual_tags],
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+
             except Exception as exc:
                 logger.warning(f"Visual ingest failed for page {page_number}: {exc}")
                 # Non-fatal: continue processing remaining pages
+            finally:
+                pass  # No throttle needed; retry logic handles 503s
     finally:
         pdf.close()
+
+    # Clean up partial file on successful completion
+    if partial_path is not None and partial_path.exists():
+        partial_path.unlink()
+        logger.debug(f"  Partial progress file removed: {partial_path}")
 
     logger.success(f"[2/6] Visual ingest complete: {len(visual_tags)} images uploaded")
     return visual_tags
@@ -505,6 +597,8 @@ async def step_enrich(
     machine_model: str,
     visual_tags: list[VisualTag],
     dry_run: bool = False,
+    artifact_dir: Path | None = None,
+    checksum: str | None = None,
 ) -> list[ChunkData]:
     """Step 4: Contextual enrichment — Rule 3 + Gemini prepend (PRD §4.1, §4.2 Rule 3).
 
@@ -558,7 +652,20 @@ async def step_enrich(
     if not dry_run:
         gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
         total = len(result_chunks)
-        for i, chunk in enumerate(result_chunks):
+        partial_path = (artifact_dir / checksum / "enriched_partial.json") if artifact_dir and checksum else None
+
+        # Resume from partial checkpoint if available
+        start_i = 0
+        if partial_path and partial_path.exists():
+            raw = json.loads(partial_path.read_text(encoding="utf-8"))
+            for j, saved in enumerate(raw):
+                if j < len(result_chunks):
+                    result_chunks[j] = ChunkData(**saved)
+            start_i = len(raw)
+            logger.info(f"[4/6] Resuming enrich from chunk {start_i}/{total}")
+
+        for i in range(start_i, total):
+            chunk = result_chunks[i]
             logger.debug(
                 f"  enrich chunk {i}/{total}: [{chunk.chunk_type}] {chunk.section_title}"
             )
@@ -569,11 +676,23 @@ async def step_enrich(
                         f"в контексте документа '{doc_name}' модели '{machine_model}'.\n\n"
                         f"{chunk.content}"
                     )
-                    response = gemini_client.models.generate_content(
-                        model=settings.LLM_ADVANCED_MODEL,
-                        contents=[prompt],
-                    )
-                    summary = (response.text or "").strip()
+                    for _attempt in range(20):
+                        try:
+                            response = gemini_client.models.generate_content(
+                                model=settings.LLM_LITE_MODEL,
+                                contents=[prompt],
+                            )
+                            summary = (response.text or "").strip()
+                            break
+                        except Exception as _exc:
+                            if _attempt < 19 and "503" in str(_exc):
+                                logger.warning(
+                                    f"  Gemini 503 на чанке {i}, "
+                                    f"попытка {_attempt + 1}/20, ждём 2s ..."
+                                )
+                                await asyncio.sleep(2)
+                            else:
+                                raise
                     if summary:
                         result_chunks[i] = dc_replace(
                             chunk,
@@ -588,11 +707,23 @@ async def step_enrich(
                         f"таблица и в какой ситуации механик её использует.\n\n"
                         f"{chunk.content}"
                     )
-                    response = gemini_client.models.generate_content(
-                        model=settings.LLM_ADVANCED_MODEL,
-                        contents=[prompt],
-                    )
-                    header = (response.text or "").strip()
+                    for _attempt in range(20):
+                        try:
+                            response = gemini_client.models.generate_content(
+                                model=settings.LLM_LITE_MODEL,
+                                contents=[prompt],
+                            )
+                            header = (response.text or "").strip()
+                            break
+                        except Exception as _exc:
+                            if _attempt < 19 and "503" in str(_exc):
+                                logger.warning(
+                                    f"  Gemini 503 на чанке {i}, "
+                                    f"попытка {_attempt + 1}/20, ждём 2s ..."
+                                )
+                                await asyncio.sleep(2)
+                            else:
+                                raise
                     if header:
                         result_chunks[i] = dc_replace(
                             chunk,
@@ -600,6 +731,14 @@ async def step_enrich(
                         )
             except Exception as exc:
                 logger.warning(f"enrich failed for chunk {i}: {exc}")
+
+            # Save partial checkpoint every 10 chunks
+            if partial_path and (i + 1) % 10 == 0:
+                _save_artifact(artifact_dir, checksum, "enriched_partial", result_chunks[: i + 1])
+
+        # Clean up partial checkpoint on successful completion
+        if partial_path and partial_path.exists():
+            partial_path.unlink()
 
     # Step 5: Reindex chunk_index 0..N-1
     result_chunks = [
@@ -809,7 +948,10 @@ async def _run_one_pdf(
         # Steps 2 & 3: Run in parallel
         async with asyncio.TaskGroup() as tg:
             visual_task = tg.create_task(
-                step_visual_ingest(pdf_path, parse_result, machine_model, args.dry_run)
+                step_visual_ingest(
+                    pdf_path, parse_result, machine_model, args.dry_run,
+                    partial_path=artifact_dir / checksum / "visual_partial.json",
+                )
             )
             chunk_task = tg.create_task(
                 step_chunk(parse_result, machine_model, args.category, args.dry_run)
@@ -825,10 +967,20 @@ async def _run_one_pdf(
             return len(chunks), len(visual_tags), False
 
     elif start_from == "chunk":
-        # Load parse + visual from cache, run steps 3–6
-        logger.info(f"[checkpoint] Загрузка parse + visual из {artifact_dir}/{checksum}/")
+        # Load parse from cache; load visual from cache if available, otherwise run it now.
+        logger.info(f"[checkpoint] Загрузка parse из {artifact_dir}/{checksum}/")
         parse_result = _load_artifact(artifact_dir, checksum, "parse", ParseResult)  # type: ignore[assignment]
-        visual_tags = _load_artifact(artifact_dir, checksum, "visual", VisualTag)  # type: ignore[assignment]
+        visual_path = artifact_dir / checksum / "visual.json"
+        if visual_path.exists():
+            visual_tags = _load_artifact(artifact_dir, checksum, "visual", VisualTag)  # type: ignore[assignment]
+        else:
+            logger.info("[checkpoint] visual.json не найден — запуск step_visual_ingest")
+            visual_tags = await step_visual_ingest(
+                pdf_path, parse_result, machine_model, args.dry_run,
+                partial_path=artifact_dir / checksum / "visual_partial.json",
+            )
+            if save_artifacts:
+                _save_artifact(artifact_dir, checksum, "visual", visual_tags)
         chunks = await step_chunk(parse_result, machine_model, args.category, args.dry_run)
 
         if save_artifacts or stop_after == "chunk":
@@ -856,7 +1008,8 @@ async def _run_one_pdf(
         if start_from == "enrich":
             chunks = _load_artifact(artifact_dir, checksum, "chunks", ChunkData)  # type: ignore[assignment]
         chunks = await step_enrich(
-            chunks, doc_name, machine_model, visual_tags, dry_run=args.dry_run
+            chunks, doc_name, machine_model, visual_tags, dry_run=args.dry_run,
+            artifact_dir=artifact_dir, checksum=checksum,
         )
         if save_artifacts or stop_after == "enrich":
             _save_artifact(artifact_dir, checksum, "enriched", chunks)

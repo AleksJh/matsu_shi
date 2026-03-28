@@ -32,7 +32,7 @@ async def embed_text(text: str) -> list[float] | None:
                     "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
                     "HTTP-Referer": "matsu-shi",
                 },
-                json={"model": settings.EMBED_MODEL, "input": text},
+                json={"model": settings.EMBED_MODEL, "input": text, "dimensions": settings.EMBED_DIM},
             )
             response.raise_for_status()
             data: list[float] = response.json()["data"][0]["embedding"]
