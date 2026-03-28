@@ -40,6 +40,10 @@ certbot certonly --standalone -d yourdomain.com
 # 4. Собрать и запустить все сервисы
 docker compose -f docker-compose.prod.yml up -d --build
 
+# ⚠️  Всегда поднимай ВСЕ сервисы через up -d, а не только один (напр. backend).
+# Если пересобрать только backend, nginx останется в старой Docker-сети и начнёт
+# отдавать 502 Bad Gateway, пока его не перезапустить вручную.
+
 # Миграции Alembic применяются автоматически при старте backend контейнера
 
 # 5. Зарегистрировать Telegram webhook
