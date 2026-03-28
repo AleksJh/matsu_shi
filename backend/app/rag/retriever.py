@@ -9,7 +9,7 @@ Pipeline (PRD §5.2):
     2. Parallel dense (pgvector cosine) + sparse (PostgreSQL FTS) retrieval
     3. Score threshold check — skip Jina and return no_answer if max_score < 0.30
     4. Merge + dedup by chunk.id (dense-first priority) → up to 40 candidates
-    5. Jina reranker (jina-reranker-v3) → top-5 final chunks
+    5. Jina reranker (jina-reranker-v3) → top-10 final chunks
     6. Model routing (PRD §5.3, §6.2): lite vs advanced based on max cosine score
 
 max_score is always taken from the dense channel BEFORE dedup.
@@ -79,7 +79,7 @@ async def retrieve(
     machine_model: str,
     session: AsyncSession,
     embedder_fn: Callable = embed_text,
-    top_k_final: int = 5,
+    top_k_final: int = 10,
 ) -> RetrievalResult:
     """Run hybrid retrieval pipeline and return a RetrievalResult.
 
@@ -89,7 +89,7 @@ async def retrieve(
         session: Async SQLAlchemy session (injected by get_db() in Phase 5).
         embedder_fn: Async callable that takes text and returns list[float].
                      Defaults to embed_text; override in tests.
-        top_k_final: Number of final chunks after reranking (default 5).
+        top_k_final: Number of final chunks after reranking (default 10).
 
     Returns:
         RetrievalResult with chunks, max_score, no_answer flag, recommended_model.
