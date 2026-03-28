@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet } from 'react-router-dom'
 import LoginPage from './pages/LoginPage'
 import UsersPage from './pages/UsersPage'
 import DocumentsPage from './pages/DocumentsPage'
@@ -8,10 +8,10 @@ import PrivateRoute from './components/PrivateRoute'
 import { useAuthStore } from './store/authStore'
 
 const NAV_LINKS = [
-  { to: '/users', label: 'Пользователи' },
-  { to: '/documents', label: 'Документы' },
-  { to: '/queries', label: 'Запросы' },
-  { to: '/stats', label: 'Статистика' },
+  { to: 'users', label: 'Пользователи' },
+  { to: 'documents', label: 'Документы' },
+  { to: 'queries', label: 'Запросы' },
+  { to: 'stats', label: 'Статистика' },
 ]
 
 function AppLayout() {
@@ -24,7 +24,7 @@ function AppLayout() {
           <NavLink
             key={link.to}
             to={link.to}
-            className={({ isActive }: { isActive: boolean }) =>
+            className={({ isActive }) =>
               `text-sm font-medium transition-colors ${
                 isActive ? 'text-blue-600' : 'text-gray-500 hover:text-gray-800'
               }`
@@ -41,14 +41,7 @@ function AppLayout() {
         </button>
       </nav>
       <main className="flex-1">
-        <Routes>
-          <Route path="/users" element={<UsersPage />} />
-          <Route path="/documents" element={<DocumentsPage />} />
-          <Route path="/queries" element={<QueriesPage />} />
-          <Route path="/stats" element={<SystemPage />} />
-          <Route path="/" element={<Navigate to="/users" replace />} />
-          <Route path="*" element={<Navigate to="/users" replace />} />
-        </Routes>
+        <Outlet />
       </main>
     </div>
   )
@@ -60,7 +53,14 @@ function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<PrivateRoute />}>
-          <Route path="/*" element={<AppLayout />} />
+          <Route element={<AppLayout />}>
+            <Route index element={<Navigate to="users" replace />} />
+            <Route path="users" element={<UsersPage />} />
+            <Route path="documents" element={<DocumentsPage />} />
+            <Route path="queries" element={<QueriesPage />} />
+            <Route path="stats" element={<SystemPage />} />
+            <Route path="*" element={<Navigate to="users" replace />} />
+          </Route>
         </Route>
       </Routes>
     </BrowserRouter>
