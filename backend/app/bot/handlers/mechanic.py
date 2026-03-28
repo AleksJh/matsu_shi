@@ -9,7 +9,7 @@ Registration state machine:
 """
 from __future__ import annotations
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import (
     InlineKeyboardMarkup,
@@ -103,3 +103,43 @@ async def cmd_start(message: Message) -> None:
         else:
             # denied or banned
             await message.answer("В доступе отказано. Обратитесь к администратору.")
+
+
+@mechanic_router.message(F.text)
+async def handle_text_message(message: Message) -> None:
+    """Handle plain text messages sent directly to the bot.
+
+    Active users are reminded to use the WebApp. Other statuses get
+    the same responses as /start so the UX is consistent.
+    """
+    if message.from_user is None:
+        return
+
+    telegram_user_id: int = message.from_user.id
+
+    async with AsyncSessionLocal() as session:
+        svc = UserService(session)
+        user = await svc.get_by_telegram_id(telegram_user_id)
+
+    if user is None:
+        await message.answer("Отправьте /start для регистрации.")
+        return
+
+    if user.status == "active":
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[
+                KeyboardButton(
+                    text="🔧 Открыть Matsu Shi",
+                    web_app=WebAppInfo(url=settings.APP_BASE_URL),
+                )
+            ]],
+            resize_keyboard=True,
+        )
+        await message.answer(
+            "Для отправки вопросов используйте встроенное приложение 👇",
+            reply_markup=kb,
+        )
+    elif user.status == "pending":
+        await message.answer("Ваша заявка ещё на рассмотрении. Ожидайте ответа.")
+    else:
+        await message.answer("В доступе отказано. Обратитесь к администратору.")

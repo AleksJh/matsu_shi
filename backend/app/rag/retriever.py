@@ -104,6 +104,15 @@ async def retrieve(
 
     # 1. Embed query
     vector = await embedder_fn(query_text)
+    if vector is None:
+        logger.warning("embed_text returned None — returning no_answer for query: {!r}", query_text)
+        return RetrievalResult(
+            chunks=[],
+            max_score=0.0,
+            no_answer=True,
+            recommended_model=settings.LLM_LITE_MODEL,
+            trace_id=_trace_id,
+        )
 
     # 2. Parallel dense + sparse retrieval
     dense_results, sparse_results = await asyncio.gather(

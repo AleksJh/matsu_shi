@@ -83,6 +83,12 @@ export function useSSE() {
       }
     } catch (err) {
       console.error('[useSSE] error:', err)
+      addMessage(sessionId, {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        content: 'Не удалось получить ответ. Попробуйте ещё раз.',
+        created_at: new Date().toISOString(),
+      })
     } finally {
       setLoading(null)
     }
