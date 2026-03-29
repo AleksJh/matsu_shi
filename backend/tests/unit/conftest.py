@@ -1,44 +1,27 @@
-"""Unit-test fixtures and module-level mocks.
+"""Fixtures and module-level mocks for web-application unit tests.
 
-Heavy/optional dependencies are mocked at the sys.modules level so that
-`scripts.ingest` can be imported without them being installed.
-This must happen at collection time (conftest, not inside test functions).
-
-All test files in this directory use the simple import pattern:
-    from scripts.ingest import step_parse, ChunkData, ...
-
-App-level modules (app.core.config, app.core.database, app.models.*) are imported
-from the real project — the .env file provides all required settings. Only truly
-uninstallable optional deps (docling, pypdfium2) are stubbed here.
+Only the minimal set of stubs required by app.* modules is set up here.
+Ingest-pipeline dependencies (docling, pypdfium2, boto3, PIL) live in
+tests/scripts/conftest.py and must not bleed into this test suite.
 """
 from __future__ import annotations
 
-import sys
-from unittest.mock import MagicMock
+import os
 
-# --- docling ---
-_docling_mock = MagicMock()
-sys.modules.setdefault("docling", _docling_mock)
-sys.modules.setdefault("docling.document_converter", _docling_mock)
-
-# --- pypdfium2 (PDF renderer, ships with docling but may be absent in CI) ---
-sys.modules.setdefault("pypdfium2", MagicMock())
-
-# --- boto3 (S3/R2 client) ---
-sys.modules.setdefault("boto3", MagicMock())
+# --- GOOGLE_API_KEY ---
+# Pydantic AI's Google provider reads GOOGLE_API_KEY from os.environ at Agent()
+# construction time, which happens at module import.  Our .env uses GEMINI_API_KEY;
+# bridge the two so pydantic-ai can initialise without a real network call.
+if "GOOGLE_API_KEY" not in os.environ:
+    os.environ["GOOGLE_API_KEY"] = os.environ.get("GEMINI_API_KEY", "test-placeholder")
 
 # --- google.genai (Gemini SDK v1.x) ---
 # Pre-import the real package so pydantic-ai can load its Google provider.
-# After this, setdefault() is a no-op for these keys; ingest tests still
-# use patch() per-test to stub individual google.genai calls.
 try:
     import google.genai as _real_google_genai  # noqa: F401
 except Exception:
+    import sys
+    from unittest.mock import MagicMock
     _google_mock = MagicMock()
     sys.modules.setdefault("google", _google_mock)
     sys.modules.setdefault("google.genai", MagicMock())
-
-# --- PIL / Pillow ---
-_pil_mock = MagicMock()
-sys.modules.setdefault("PIL", _pil_mock)
-sys.modules.setdefault("PIL.Image", MagicMock())

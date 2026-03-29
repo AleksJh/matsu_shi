@@ -1,6 +1,6 @@
 """Unit tests for step_parse() and _prompt_machine_model() — Task 2.2.
 
-All external dependencies (filesystem, DB, Docling) are mocked.
+All external dependencies (filesystem, DB, Docling, pypdf) are mocked.
 Tests run without a real PDF, database connection, or docling installation.
 
 Import strategy:
@@ -8,10 +8,14 @@ Import strategy:
     has already injected docling stubs into sys.modules before first use.
   - pdf_path is always a MagicMock (not a real pathlib.Path), so no filesystem
     access occurs and no Path.read_bytes patching is needed.
+  - pypdf.PdfReader / PdfWriter are patched via patch.object on the global
+    sys.modules["pypdf"] MagicMock (set by conftest) to control page counts
+    without requiring a real PDF file.
 """
 from __future__ import annotations
 
 import hashlib
+import sys
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -49,6 +53,13 @@ def _make_docling_result(
     mock_result = MagicMock()
     mock_result.document = mock_doc
     return mock_result
+
+
+def _make_pypdf_reader_mock(num_pages: int) -> MagicMock:
+    """Return a mock PdfReader whose .pages list has *num_pages* items."""
+    mock_reader = MagicMock()
+    mock_reader.pages = [MagicMock() for _ in range(num_pages)]
+    return mock_reader
 
 
 def _make_picture(page_no: int, bbox: MagicMock | None = None) -> MagicMock:
@@ -136,8 +147,14 @@ async def test_returns_parse_result_fields() -> None:
 
     fake_result = _make_docling_result(markdown="# Section\n\nContent.", num_pages=5)
     pdf_path = _make_pdf_path("hydraulics_manual.pdf")
+    mock_reader = _make_pypdf_reader_mock(num_pages=5)
+    pypdf_mod = sys.modules["pypdf"]
 
-    with patch("scripts.ingest.DocumentConverter") as mock_converter_cls:
+    with (
+        patch("scripts.ingest.DocumentConverter") as mock_converter_cls,
+        patch.object(pypdf_mod, "PdfReader", return_value=mock_reader),
+        patch.object(pypdf_mod, "PdfWriter"),
+    ):
         mock_converter_cls.return_value.convert.return_value = fake_result
 
         result = await step_parse(
@@ -181,8 +198,14 @@ async def test_figure_pages_no_bbox_gives_none() -> None:
     pic = _make_picture(page_no=2, bbox=None)
     fake_result = _make_docling_result(pictures=[pic])
     pdf_path = _make_pdf_path()
+    mock_reader = _make_pypdf_reader_mock(num_pages=3)
+    pypdf_mod = sys.modules["pypdf"]
 
-    with patch("scripts.ingest.DocumentConverter") as mock_converter_cls:
+    with (
+        patch("scripts.ingest.DocumentConverter") as mock_converter_cls,
+        patch.object(pypdf_mod, "PdfReader", return_value=mock_reader),
+        patch.object(pypdf_mod, "PdfWriter"),
+    ):
         mock_converter_cls.return_value.convert.return_value = fake_result
 
         result = await step_parse(pdf_path, "PC300-8", rebuild_index=False, dry_run=True)
@@ -206,8 +229,14 @@ async def test_figure_pages_with_bbox() -> None:
     pic = _make_picture(page_no=4, bbox=bbox)
     fake_result = _make_docling_result(pictures=[pic])
     pdf_path = _make_pdf_path()
+    mock_reader = _make_pypdf_reader_mock(num_pages=4)
+    pypdf_mod = sys.modules["pypdf"]
 
-    with patch("scripts.ingest.DocumentConverter") as mock_converter_cls:
+    with (
+        patch("scripts.ingest.DocumentConverter") as mock_converter_cls,
+        patch.object(pypdf_mod, "PdfReader", return_value=mock_reader),
+        patch.object(pypdf_mod, "PdfWriter"),
+    ):
         mock_converter_cls.return_value.convert.return_value = fake_result
 
         result = await step_parse(pdf_path, "PC300-8", rebuild_index=False, dry_run=True)
