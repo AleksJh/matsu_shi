@@ -2,7 +2,7 @@ import { useAuthStore } from '../store/authStore'
 import { useMessageStore } from '../store/messageStore'
 import type { QueryResponse } from '../types'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
 /**
  * useSSE — submits a query to POST /api/v1/chat/query via fetch + ReadableStream.
