@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Literal
 
+from loguru import logger
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
@@ -34,8 +36,24 @@ ClassifierAgent: Agent[None, ClassifierOutput] = Agent(
 async def classify_query(query_text: str) -> str:
     """Classify a mechanic's query as 'simple' or 'complex'.
 
+    Retries up to 20 times on Gemini 503 UNAVAILABLE errors (2 s flat wait).
+    Raises on all other exceptions or after exhausting retries (PRD §6.2, Roadmap 9.6).
+
     Returns:
-        "simple" or "complex" string (PRD §6.2).
+        "simple" or "complex" string.
     """
-    result = await ClassifierAgent.run(query_text)
-    return result.output.query_class
+    for _attempt in range(20):
+        try:
+            result = await ClassifierAgent.run(query_text)
+            return result.output.query_class
+        except Exception as _exc:
+            if _attempt < 19 and "503" in str(_exc):
+                logger.warning(
+                    "ClassifierAgent 503, attempt {}/20, waiting 2s ...",
+                    _attempt + 1,
+                )
+                await asyncio.sleep(2)
+            else:
+                raise
+    # Unreachable: last attempt raises above, but satisfies type checkers.
+    raise RuntimeError("classify_query: exhausted 20 retries")

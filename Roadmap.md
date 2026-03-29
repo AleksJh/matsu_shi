@@ -414,11 +414,11 @@
 
 ---
 
-## ⏳ PHASE 9 — Pilot & Tuning
+## 🔄 PHASE 9 — Pilot & Tuning
 
 **Goal:** Real data is ingested, real mechanics onboarded, and thresholds are validated.
 
-### ⏳ 9.1 Ingest Real Documents
+### ✅ 9.1 Ingest Real Documents
 - Run `ingest.py` against actual Komatsu PDF manuals locally.
 - Verify each document appears in the admin Documents page with correct chunk_count and status `indexed`.
 - Spot-check 5–10 queries against each document and review retrieval scores in Langfuse.
@@ -442,7 +442,7 @@
 - Verify Loguru logs are readable in `docker compose logs backend`.
 - Verify admin `/stats` command in Telegram returns accurate numbers.
 
-### ⏳ 9.6 Gemini 503 Retry in RAG Agent
+### ✅ 9.6 Gemini 503 Retry in RAG Agent
 - `ClassifierAgent` and `ResponderAgent` (Pydantic AI) call Gemini at query time and are currently unprotected against 503 UNAVAILABLE spikes.
 - Add retry logic matching the ingest pipeline standard: 20 attempts, 2s flat wait, only on 503 errors.
 - Apply to all Gemini call sites used at inference time: `classifier.py`, `responder.py`, and `embedder.py` (OpenRouter may also return 503).

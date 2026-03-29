@@ -119,8 +119,12 @@ def test_embed_text_http_4xx_returns_none():
     assert result is None
 
 
-def test_embed_text_http_5xx_returns_none():
-    """HTTP 5xx from OpenRouter must return None without raising."""
+@patch("asyncio.sleep")
+def test_embed_text_http_5xx_returns_none(mock_sleep):
+    """HTTP 5xx (503) from OpenRouter must return None without hanging 40s.
+
+    asyncio.sleep is patched so the 20-retry loop completes instantly.
+    """
     resp = _mock_response(503)
 
     with _patch_client(post_return=resp):

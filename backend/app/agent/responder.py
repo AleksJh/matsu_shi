@@ -21,6 +21,7 @@ Computed fields:
 """
 from __future__ import annotations
 
+import asyncio
 import time
 
 from loguru import logger
@@ -161,10 +162,22 @@ async def respond(
     model_name = route_query(retrieval_result.max_score, query_class)
     model_label = "lite" if model_name == settings.LLM_LITE_MODEL else "advanced"
 
-    result = await ResponderAgent.run(
-        user_prompt,
-        model=f"google-gla:{model_name}",
-    )
+    for _attempt in range(20):
+        try:
+            result = await ResponderAgent.run(
+                user_prompt,
+                model=f"google-gla:{model_name}",
+            )
+            break
+        except Exception as _exc:
+            if _attempt < 19 and "503" in str(_exc):
+                logger.warning(
+                    "ResponderAgent 503, attempt {}/20, waiting 2s ...",
+                    _attempt + 1,
+                )
+                await asyncio.sleep(2)
+            else:
+                raise
 
     # Inject computed fields that must reflect pipeline state, not LLM output
     response = result.output.model_copy(

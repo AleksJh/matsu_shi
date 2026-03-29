@@ -10,6 +10,8 @@ validation is the caller's responsibility.
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 from loguru import logger
 
@@ -21,33 +23,47 @@ _BASE_URL = "https://openrouter.ai/api/v1"
 async def embed_text(text: str) -> list[float] | None:
     """Embed *text* via OpenRouter and return the float vector.
 
-    Returns None (and logs a WARNING) on any error so that callers can
-    continue processing the remaining items without crashing.
+    Retries up to 20 times on HTTP 503 (2 s flat wait, Roadmap 9.6).
+    All other HTTP errors, timeouts, and parse errors return None immediately
+    so that callers can continue processing remaining items without crashing.
     """
-    try:
-        async with httpx.AsyncClient(base_url=_BASE_URL) as client:
-            response = await client.post(
-                "/embeddings",
-                headers={
-                    "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
-                    "HTTP-Referer": "matsu-shi",
-                },
-                json={"model": settings.EMBED_MODEL, "input": text, "dimensions": settings.EMBED_DIM},
+    for _attempt in range(20):
+        try:
+            async with httpx.AsyncClient(base_url=_BASE_URL) as client:
+                response = await client.post(
+                    "/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                        "HTTP-Referer": "matsu-shi",
+                    },
+                    json={"model": settings.EMBED_MODEL, "input": text, "dimensions": settings.EMBED_DIM},
+                )
+                response.raise_for_status()
+                data: list[float] = response.json()["data"][0]["embedding"]
+                return data
+        except httpx.HTTPStatusError as exc:
+            if _attempt < 19 and exc.response.status_code == 503:
+                logger.warning(
+                    "embed_text: OpenRouter 503, attempt {}/20, waiting 2s ...",
+                    _attempt + 1,
+                )
+                await asyncio.sleep(2)
+                continue
+            logger.warning(
+                "embed_text: HTTP {} от OpenRouter: {}",
+                exc.response.status_code,
+                exc,
             )
-            response.raise_for_status()
-            data: list[float] = response.json()["data"][0]["embedding"]
-            return data
-    except httpx.HTTPStatusError as exc:
-        logger.warning(
-            f"embed_text: HTTP {exc.response.status_code} от OpenRouter: {exc}"
-        )
-        return None
-    except httpx.TimeoutException as exc:
-        logger.warning(f"embed_text: timeout при обращении к OpenRouter: {exc}")
-        return None
-    except (KeyError, IndexError, ValueError) as exc:
-        logger.warning(f"embed_text: неожиданный формат ответа OpenRouter: {exc}")
-        return None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"embed_text: ошибка: {exc}")
-        return None
+            return None
+        except httpx.TimeoutException as exc:
+            logger.warning("embed_text: timeout при обращении к OpenRouter: {}", exc)
+            return None
+        except (KeyError, IndexError, ValueError) as exc:
+            logger.warning("embed_text: неожиданный формат ответа OpenRouter: {}", exc)
+            return None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("embed_text: ошибка: {}", exc)
+            return None
+    # Reached only when all 20 attempts returned 503.
+    logger.warning("embed_text: исчерпаны 20 попыток на 503, возвращаю None")
+    return None
