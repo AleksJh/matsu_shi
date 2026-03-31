@@ -296,3 +296,75 @@ def test_build_context_includes_visual_refs():
     )
     context = _build_context([(chunk, 0.8)])
     assert "https://r2.example.com/page_42.webp" in context
+
+
+# ---------------------------------------------------------------------------
+# 12. respond() retries on 504 DEADLINE_EXCEEDED
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_respond_retries_on_504():
+    """respond() must retry when Google returns 504 DEADLINE_EXCEEDED."""
+    retrieval = _make_retrieval_result(max_score=0.80)
+    fake_llm = _make_llm_response()
+
+    err_504 = Exception("status_code: 504, model_name: gemini-2.5-flash, body: DEADLINE_EXCEEDED")
+    run_mock = AsyncMock(side_effect=[err_504, fake_llm])
+
+    with patch.object(ResponderAgent, "run", new=run_mock):
+        result = await respond(
+            query_text="Вопрос",
+            retrieval_result=retrieval,
+            query_class="simple",
+            session_id=None,
+        )
+
+    assert run_mock.call_count == 2
+    assert result.answer == fake_llm.output.answer
+
+
+# ---------------------------------------------------------------------------
+# 13. respond() injects visual_url from chunk.visual_refs when page matches
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_visual_url_injected_from_chunk_visual_refs():
+    """visual_url must be set on citations whose page matches a chunk with visual_refs."""
+    visual_url = "https://r2.example.com/page42.webp"
+    chunk = _make_chunk(page_number=42, visual_refs=[visual_url])
+    retrieval = _make_retrieval_result(max_score=0.80, chunks=[(chunk, 0.80)])
+    citation = Citation(doc_name="PC300-8 Shop Manual", section="Гидравлика", page=42)
+    fake_llm = _make_llm_response(citations=[citation])
+
+    with patch.object(ResponderAgent, "run", new=AsyncMock(return_value=fake_llm)):
+        result = await respond(
+            query_text="Вопрос",
+            retrieval_result=retrieval,
+            query_class="simple",
+            session_id=None,
+        )
+
+    assert result.citations[0].visual_url == visual_url
+
+
+# ---------------------------------------------------------------------------
+# 14. respond() does NOT inject visual_url when no chunk page matches citation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_visual_url_not_injected_when_no_page_match():
+    """visual_url must remain None when no retrieved chunk matches the citation page."""
+    chunk = _make_chunk(page_number=42, visual_refs=["https://r2.example.com/page42.webp"])
+    retrieval = _make_retrieval_result(max_score=0.80, chunks=[(chunk, 0.80)])
+    citation = Citation(doc_name="PC300-8 Shop Manual", section="Гидравлика", page=99)
+    fake_llm = _make_llm_response(citations=[citation])
+
+    with patch.object(ResponderAgent, "run", new=AsyncMock(return_value=fake_llm)):
+        result = await respond(
+            query_text="Вопрос",
+            retrieval_result=retrieval,
+            query_class="simple",
+            session_id=None,
+        )
+
+    assert result.citations[0].visual_url is None

@@ -170,18 +170,38 @@ async def respond(
             )
             break
         except Exception as _exc:
-            if _attempt < 19 and "503" in str(_exc):
+            if _attempt < 19 and (
+                "503" in str(_exc)
+                or "504" in str(_exc)
+                or "DEADLINE_EXCEEDED" in str(_exc)
+            ):
                 logger.warning(
-                    "ResponderAgent 503, attempt {}/20, waiting 2s ...",
+                    "ResponderAgent transient error (attempt {}/20), waiting 2s: {}",
                     _attempt + 1,
+                    _exc,
                 )
                 await asyncio.sleep(2)
             else:
                 raise
 
+    # Build page → first visual_ref lookup from retrieved chunks
+    page_to_visual: dict[int, str] = {}
+    for chunk, _ in retrieval_result.chunks:
+        if chunk.visual_refs and chunk.page_number is not None:
+            page_to_visual.setdefault(chunk.page_number, chunk.visual_refs[0])
+
+    # Inject visual_url into citations whose page matches a retrieved chunk
+    updated_citations = [
+        c.model_copy(update={"visual_url": page_to_visual[c.page]})
+        if c.page in page_to_visual
+        else c
+        for c in result.output.citations
+    ]
+
     # Inject computed fields that must reflect pipeline state, not LLM output
     response = result.output.model_copy(
         update={
+            "citations": updated_citations,
             "model_used": model_label,
             "retrieval_score": retrieval_result.max_score,
             "query_class": query_class,
