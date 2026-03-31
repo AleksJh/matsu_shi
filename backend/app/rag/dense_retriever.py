@@ -11,7 +11,7 @@ mandatory per PRD §4.4 to prevent cross-contamination between models.
 """
 from __future__ import annotations
 
-from sqlalchemy import cast, select
+from sqlalchemy import Float, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pgvector.sqlalchemy import Vector
@@ -38,7 +38,7 @@ async def dense_retrieve(
         score = 1.0 - cosine_distance, range [0.0 .. 1.0].
         Returns an empty list if no matching chunks exist.
     """
-    distance_col = Chunk.embedding.op("<=>")(cast(vector, Vector(len(vector))))
+    distance_col = Chunk.embedding.op("<=>", return_type=Float())(cast(vector, Vector(len(vector))))
     stmt = (
         select(Chunk, distance_col.label("distance"))
         .where(Chunk.machine_model == machine_model)
