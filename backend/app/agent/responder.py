@@ -147,8 +147,8 @@ async def respond(
     # Build structured context string for the LLM
     context = _build_context(retrieval_result.chunks)
 
-    # For complex queries with prior history, prepend the diagnostic thread
-    if query_class == "complex" and prior_context:
+    # For queries with prior history (any class), prepend the diagnostic thread
+    if prior_context:
         prior_block = "\n\n".join(prior_context)
         user_prompt = (
             f"История диагностики:\n{prior_block}\n\n"
@@ -189,6 +189,13 @@ async def respond(
     for chunk, _ in retrieval_result.chunks:
         if chunk.visual_refs and chunk.page_number is not None:
             page_to_visual.setdefault(chunk.page_number, chunk.visual_refs[0])
+
+    logger.info(
+        "visual_url lookup: {} pages with images out of {} chunks (session={})",
+        len(page_to_visual),
+        len(retrieval_result.chunks),
+        session_id,
+    )
 
     # Inject visual_url into citations whose page matches a retrieved chunk
     updated_citations = [

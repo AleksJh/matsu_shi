@@ -368,3 +368,35 @@ async def test_visual_url_not_injected_when_no_page_match():
         )
 
     assert result.citations[0].visual_url is None
+
+
+# ---------------------------------------------------------------------------
+# 15. respond() uses prior_context even when query_class == "simple"
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_respond_simple_with_prior_context_includes_history():
+    """When prior_context is provided, LLM prompt must include prior history
+    regardless of query_class (even 'simple')."""
+    retrieval = _make_retrieval_result(max_score=0.80)
+    fake_llm = _make_llm_response()
+    prior = ["Вопрос: Какой фильтр?\nОтвет: Гидравлический фильтр №7."]
+
+    captured_prompt: list[str] = []
+
+    async def mock_run(prompt, model):
+        captured_prompt.append(prompt)
+        return fake_llm
+
+    with patch.object(ResponderAgent, "run", side_effect=mock_run):
+        await respond(
+            query_text="А как его заменить?",
+            retrieval_result=retrieval,
+            query_class="simple",
+            session_id=1,
+            prior_context=prior,
+        )
+
+    assert captured_prompt, "ResponderAgent.run was not called"
+    assert "История диагностики:" in captured_prompt[0]
+    assert "Гидравлический фильтр №7." in captured_prompt[0]

@@ -73,9 +73,10 @@ class QueryService:
         # 4. Classification
         query_class = await classify_query(query_text)
 
-        # 5. Prior context for complex sessions
+        # 5. Prior context — load for any query within a session so follow-up
+        # questions ("simple" class) still receive conversation history
         prior_context: list[str] | None = None
-        if query_class == "complex" and session_id is not None:
+        if session_id is not None:
             history = await SessionService(self._session).get_history(session_id)
             if history:
                 prior_context = [
