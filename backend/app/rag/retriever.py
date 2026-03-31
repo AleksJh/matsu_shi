@@ -27,6 +27,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 from app.core.tracing import create_trace, get_langfuse
 from app.models.chunk import Chunk
 from app.rag.dense_retriever import dense_retrieve
@@ -114,11 +115,17 @@ async def retrieve(
             trace_id=_trace_id,
         )
 
-    # 2. Parallel dense + sparse retrieval
-    dense_results, sparse_results = await asyncio.gather(
-        dense_retrieve(vector, machine_model, session, top_k=20),
-        sparse_retrieve(query_text, machine_model, session, top_k=20),
-    )
+    # 2. Parallel dense + sparse retrieval — each gets its own session to avoid
+    # asyncpg "another operation is in progress" when two queries share one connection.
+    async def _dense():
+        async with AsyncSessionLocal() as s:
+            return await dense_retrieve(vector, machine_model, s, top_k=20)
+
+    async def _sparse():
+        async with AsyncSessionLocal() as s:
+            return await sparse_retrieve(query_text, machine_model, s, top_k=20)
+
+    dense_results, sparse_results = await asyncio.gather(_dense(), _sparse())
 
     # 3. max cosine score from dense channel (before dedup)
     max_score = max((score for _, score in dense_results), default=0.0)
