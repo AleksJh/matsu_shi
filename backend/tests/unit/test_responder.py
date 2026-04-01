@@ -26,6 +26,20 @@ from app.schemas.query import Citation, QueryResponse
 
 
 # ---------------------------------------------------------------------------
+# Module-level fixture: patch retrieve_visual → None for all tests by default.
+# Tests that specifically test visual logic override this with their own patch.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _no_visual(monkeypatch):
+    """Prevent respond() tests from hitting the real DB via retrieve_visual."""
+    monkeypatch.setattr(
+        "app.agent.responder.retrieve_visual",
+        AsyncMock(return_value=None),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
@@ -324,19 +338,20 @@ async def test_respond_retries_on_504():
 
 
 # ---------------------------------------------------------------------------
-# 13. respond() injects visual_url from chunk.visual_refs when page matches
+# 13. respond() injects visual_url from retrieve_visual() result
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_visual_url_injected_from_chunk_visual_refs():
-    """visual_url must be set on citations whose page matches a chunk with visual_refs."""
+async def test_visual_url_injected_from_retrieve_visual():
+    """visual_url must be set on citations[0] when retrieve_visual returns a chunk."""
     visual_url = "https://r2.example.com/page42.webp"
-    chunk = _make_chunk(page_number=42, visual_refs=[visual_url])
-    retrieval = _make_retrieval_result(max_score=0.80, chunks=[(chunk, 0.80)])
+    visual_chunk = _make_chunk(page_number=None, visual_refs=[visual_url])
+    retrieval = _make_retrieval_result(max_score=0.80)
     citation = Citation(doc_name="PC300-8 Shop Manual", section="Гидравлика", page=42)
     fake_llm = _make_llm_response(citations=[citation])
 
-    with patch.object(ResponderAgent, "run", new=AsyncMock(return_value=fake_llm)):
+    with patch.object(ResponderAgent, "run", new=AsyncMock(return_value=fake_llm)), \
+         patch("app.agent.responder.retrieve_visual", new=AsyncMock(return_value=(visual_chunk, 0.80))):
         result = await respond(
             query_text="Вопрос",
             retrieval_result=retrieval,
@@ -348,14 +363,13 @@ async def test_visual_url_injected_from_chunk_visual_refs():
 
 
 # ---------------------------------------------------------------------------
-# 14. respond() does NOT inject visual_url when no chunk page matches citation
+# 14. respond() does NOT inject visual_url when retrieve_visual returns None
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_visual_url_not_injected_when_no_page_match():
-    """visual_url must remain None when no retrieved chunk matches the citation page."""
-    chunk = _make_chunk(page_number=42, visual_refs=["https://r2.example.com/page42.webp"])
-    retrieval = _make_retrieval_result(max_score=0.80, chunks=[(chunk, 0.80)])
+async def test_visual_url_not_injected_when_retrieve_visual_returns_none():
+    """visual_url must remain None when retrieve_visual returns None (autouse fixture)."""
+    retrieval = _make_retrieval_result(max_score=0.80)
     citation = Citation(doc_name="PC300-8 Shop Manual", section="Гидравлика", page=99)
     fake_llm = _make_llm_response(citations=[citation])
 

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 import httpx
 from loguru import logger
-
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -194,3 +194,38 @@ async def retrieve(
         recommended_model=recommended,
         trace_id=_trace_id,
     )
+
+
+async def retrieve_visual(
+    query_text: str,
+    machine_model: str,
+    min_score: float = 0.75,
+) -> tuple[Chunk, float] | None:
+    """Search visual_caption chunks only via vector similarity.
+
+    Returns the best matching visual chunk above min_score, or None if
+    nothing relevant is found. Uses its own session (safe for parallel calls).
+    """
+    vector = await embed_text(query_text)
+    if vector is None:
+        return None
+
+    async with AsyncSessionLocal() as db:
+        stmt = (
+            select(Chunk, (1.0 - Chunk.embedding.cosine_distance(vector)).label("score"))
+            .where(Chunk.chunk_type == "visual_caption")
+            .where(Chunk.machine_model == machine_model)
+            .order_by(Chunk.embedding.cosine_distance(vector))
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        row = result.first()
+
+    if row is None:
+        return None
+
+    chunk, score = row
+    if score < min_score:
+        return None
+
+    return chunk, score

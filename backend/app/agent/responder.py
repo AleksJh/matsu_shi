@@ -31,7 +31,7 @@ from app.agent.router import route_query
 from app.core.config import settings
 from app.core.tracing import get_langfuse
 from app.models.chunk import Chunk
-from app.rag.retriever import RetrievalResult
+from app.rag.retriever import RetrievalResult, retrieve_visual
 from app.schemas.query import Citation, QueryResponse  # noqa: F401 (re-exported for tests)
 
 # ---------------------------------------------------------------------------
@@ -128,6 +128,7 @@ async def respond(
     session_id: int | None,
     prior_context: list[str] | None = None,
     trace_id: str | None = None,
+    machine_model: str = "",
 ) -> QueryResponse:
     """Generate a structured QueryResponse from retrieval results.
 
@@ -195,25 +196,30 @@ async def respond(
         result.output.answer, result.output.citations
     )
 
-    # Build page → first visual_ref lookup from retrieved chunks
-    page_to_visual: dict[int, str] = {}
-    for chunk, _ in retrieval_result.chunks:
-        if chunk.visual_refs and chunk.page_number is not None:
-            page_to_visual.setdefault(chunk.page_number, chunk.visual_refs[0])
-
-    logger.info(
-        "visual_url lookup: {} pages with images out of {} chunks (session={})",
-        len(page_to_visual),
-        len(retrieval_result.chunks),
-        session_id,
+    # Image search — one vector search filtered to visual_caption chunks
+    visual_result = await retrieve_visual(
+        query_text=query_text,
+        machine_model=machine_model,
+        min_score=settings.VISUAL_MIN_SCORE,
     )
 
-    # Inject visual_url into citations whose page matches a retrieved chunk
+    visual_url: str | None = None
+    if visual_result:
+        visual_chunk, visual_score = visual_result
+        visual_url = visual_chunk.visual_refs[0] if visual_chunk.visual_refs else None
+        logger.info(
+            "visual_url found: score={:.3f} chunk_id={} (session={})",
+            visual_score,
+            visual_chunk.id,
+            session_id,
+        )
+    else:
+        logger.info("visual_url: no visual chunk above threshold (session={})", session_id)
+
+    # Attach visual_url to the first citation only
     updated_citations = [
-        c.model_copy(update={"visual_url": page_to_visual[c.page]})
-        if c.page in page_to_visual
-        else c
-        for c in result.output.citations
+        c.model_copy(update={"visual_url": visual_url}) if i == 0 and visual_url else c
+        for i, c in enumerate(result.output.citations)
     ]
 
     # Inject computed fields that must reflect pipeline state, not LLM output

@@ -92,6 +92,7 @@ class QueryService:
             session_id=session_id,
             prior_context=prior_context,
             trace_id=retrieval_result.trace_id,
+            machine_model=machine_model,
         )
 
     async def persist_query(

@@ -131,15 +131,15 @@ async def test_responder_retries_on_503_then_succeeds(mock_sleep):
     run_mock = AsyncMock(side_effect=[_503_exception(), good_result])
     retrieval = _make_retrieval_result()
 
-    with patch.object(ResponderAgent, "run", run_mock):
-        # Patch Langfuse to avoid real tracing setup
-        with patch("app.agent.responder.get_langfuse", MagicMock()):
-            response = await respond(
-                query_text="Почему давит масло?",
-                retrieval_result=retrieval,
-                query_class="simple",
-                session_id=None,
-            )
+    with patch.object(ResponderAgent, "run", run_mock), \
+         patch("app.agent.responder.retrieve_visual", new=AsyncMock(return_value=None)), \
+         patch("app.agent.responder.get_langfuse", MagicMock()):
+        response = await respond(
+            query_text="Почему давит масло?",
+            retrieval_result=retrieval,
+            query_class="simple",
+            session_id=None,
+        )
 
     assert response.answer == "Замените фильтр гидравлики."
     assert run_mock.call_count == 2
