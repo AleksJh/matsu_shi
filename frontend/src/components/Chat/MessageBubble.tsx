@@ -15,7 +15,7 @@ marked.setOptions({ gfm: true, breaks: true })
  * DOMPurify sanitization and can be targeted via event delegation.
  */
 function injectCitationSpans(answer: string, citations: Citation[]): string {
-  return answer.replace(/\[(\d+)\]/g, (match, numStr) => {
+  return answer.replace(/\[(\d+)\]/g, (_match, numStr) => {
     const idx = parseInt(numStr, 10)
     if (idx >= 1 && idx <= citations.length) {
       return `<span class="citation-marker" data-idx="${idx}" style="display:inline;cursor:pointer;color:var(--tg-theme-link-color,#2481cc);font-size:0.75em;vertical-align:super;font-weight:600;">[${idx}]</span>`
