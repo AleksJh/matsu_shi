@@ -13,7 +13,7 @@ export function CitationBlock({ citations }: CitationBlockProps) {
       <p className="mb-1 font-semibold">Источники:</p>
       {citations.map((c, i) => (
         <p key={i} className="truncate">
-          {c.doc_name} | {c.section} | Стр. {c.page}
+          [{i + 1}] {c.doc_name} — {c.section} — Стр. {c.page}
         </p>
       ))}
     </div>

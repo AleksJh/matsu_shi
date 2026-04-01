@@ -49,8 +49,7 @@ _SYSTEM_PROMPT = """\
 предоставленного контекста из технических мануалов.
 
 Правила:
-1. Каждое техническое утверждение ОБЯЗАТЕЛЬНО сопровождается ссылкой:
-   [Документ: {doc_name} | Раздел: {section} | Стр. {page}]
+1. После каждого технического утверждения вставляй маркер [N], где N — порядковый номер соответствующей записи в списке citations (начиная с 1). Каждый уникальный источник должен быть в citations ровно один раз.
 2. Если в контексте нет ответа — строго отвечай:
    "Информация не найдена. Попробуйте добавить конкретику в запрос."
 3. Никогда не домысливай. Никогда не используй знания вне контекста.
@@ -70,6 +69,13 @@ ResponderAgent: Agent[None, QueryResponse] = Agent(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _normalize_citation_markers(answer: str, citations: list) -> str:
+    """Strip [N] markers where N exceeds the length of the citations list."""
+    import re
+    n = len(citations)
+    return re.sub(r'\[(\d+)\]', lambda m: m.group(0) if int(m.group(1)) <= n else '', answer)
 
 
 def _build_context(chunks: list[tuple[Chunk, float]]) -> str:
@@ -184,6 +190,11 @@ async def respond(
             else:
                 raise
 
+    # Normalize [N] markers: strip any that reference a non-existent citation
+    normalized_answer = _normalize_citation_markers(
+        result.output.answer, result.output.citations
+    )
+
     # Build page → first visual_ref lookup from retrieved chunks
     page_to_visual: dict[int, str] = {}
     for chunk, _ in retrieval_result.chunks:
@@ -208,6 +219,7 @@ async def respond(
     # Inject computed fields that must reflect pipeline state, not LLM output
     response = result.output.model_copy(
         update={
+            "answer": normalized_answer,
             "citations": updated_citations,
             "model_used": model_label,
             "retrieval_score": retrieval_result.max_score,

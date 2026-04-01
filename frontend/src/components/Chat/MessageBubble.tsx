@@ -1,19 +1,39 @@
+import { useState, useCallback } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import type { Message } from '../../types'
+import type { Message, Citation } from '../../types'
 import { CitationBlock } from './CitationBlock'
 import { ImageViewer } from './ImageViewer'
 import { FeedbackButtons } from './FeedbackButtons'
+import { InlineCitation } from './InlineCitation'
 
 // Configure marked once
 marked.setOptions({ gfm: true, breaks: true })
+
+/**
+ * Replace [N] markers in the answer string with <span> tags that survive
+ * DOMPurify sanitization and can be targeted via event delegation.
+ */
+function injectCitationSpans(answer: string, citations: Citation[]): string {
+  return answer.replace(/\[(\d+)\]/g, (match, numStr) => {
+    const idx = parseInt(numStr, 10)
+    if (idx >= 1 && idx <= citations.length) {
+      return `<span class="citation-marker" data-idx="${idx}" style="display:inline;cursor:pointer;color:var(--tg-theme-link-color,#2481cc);font-size:0.75em;vertical-align:super;font-weight:600;">[${idx}]</span>`
+    }
+    return ''  // Strip out-of-range markers
+  })
+}
 
 interface MarkdownContentProps {
   content: string
 }
 
 function MarkdownContent({ content }: MarkdownContentProps) {
-  const html = DOMPurify.sanitize(marked(content) as string)
+  // Allow span and data-idx through DOMPurify so citation markers survive
+  const html = DOMPurify.sanitize(marked(content) as string, {
+    ADD_TAGS: ['span'],
+    ADD_ATTR: ['data-idx', 'style'],
+  })
   return (
     <div
       className="prose prose-sm max-w-none"
@@ -31,6 +51,27 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const citations = message.response?.citations ?? []
   const firstVisual = citations.find((c) => c.visual_url)?.visual_url ?? null
+
+  // Track which citation index is active for the popover (1-based, or null)
+  const [activeCitationIdx, setActiveCitationIdx] = useState<number | null>(null)
+
+  // Event delegation handler on the markdown container
+  const handleContainerClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-idx]')
+      if (el?.dataset.idx) {
+        const idx = parseInt(el.dataset.idx, 10)
+        setActiveCitationIdx((prev) => (prev === idx ? null : idx))
+      }
+    },
+    [],
+  )
+
+  // Pre-process content: inject citation spans before passing to MarkdownContent
+  const processedContent =
+    !isUser && citations.length > 0
+      ? injectCitationSpans(message.content, citations)
+      : message.content
 
   return (
     <div className={`flex px-4 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -51,7 +92,18 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <p>{message.content}</p>
         ) : (
           <>
-            <MarkdownContent content={message.content} />
+            {/* Wrap markdown in a div that handles citation click via delegation */}
+            <div style={{ position: 'relative' }} onClick={handleContainerClick}>
+              <MarkdownContent content={processedContent} />
+              {/* Render active citation popover anchored to the container */}
+              {activeCitationIdx !== null && citations[activeCitationIdx - 1] && (
+                <InlineCitation
+                  index={activeCitationIdx}
+                  citation={citations[activeCitationIdx - 1]}
+                  onClose={() => setActiveCitationIdx(null)}
+                />
+              )}
+            </div>
             {citations.length > 0 && <CitationBlock citations={citations} />}
             {firstVisual && <ImageViewer url={firstVisual} />}
             {message.query_id && <FeedbackButtons queryId={message.query_id} />}
