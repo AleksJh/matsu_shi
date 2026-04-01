@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # RAG Thresholds
     RETRIEVAL_SCORE_THRESHOLD: float = 0.65
     RETRIEVAL_NO_ANSWER_THRESHOLD: float = 0.30
+    VISUAL_MIN_SCORE: float = 0.75
 
     # Embedding dimension — pgvector HNSW max = 2000; qwen3-embedding-4b supports MRL truncation
     # Confirm actual dim from first OpenRouter call; update .env before applying migration
