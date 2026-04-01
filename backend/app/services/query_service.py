@@ -63,6 +63,16 @@ class QueryService:
 
         # 3. no_answer — skip all LLM calls
         if retrieval_result.no_answer:
+            if retrieval_result.embed_failed:
+                return QueryResponse(
+                    answer="Сервис поиска временно недоступен. Попробуйте повторить запрос через несколько минут.",
+                    citations=[],
+                    model_used="none",
+                    retrieval_score=0.0,
+                    query_class="simple",
+                    no_answer=True,
+                    session_id=session_id,
+                )
             return await respond(
                 query_text=query_text,
                 retrieval_result=retrieval_result,

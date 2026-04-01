@@ -42,6 +42,7 @@ class RetrievalResult:
     no_answer: bool
     recommended_model: str             # settings.LLM_LITE_MODEL or LLM_ADVANCED_MODEL
     trace_id: str | None = field(default=None)  # Langfuse trace_id for Phase 5 correlation
+    embed_failed: bool = field(default=False)   # True when embed_text returned None (model unavailable)
 
 
 async def _rerank(
@@ -113,6 +114,7 @@ async def retrieve(
             no_answer=True,
             recommended_model=settings.LLM_LITE_MODEL,
             trace_id=_trace_id,
+            embed_failed=True,
         )
 
     # 2. Parallel dense + sparse retrieval — each gets its own session to avoid
