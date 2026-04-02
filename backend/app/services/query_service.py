@@ -1,13 +1,15 @@
-"""Query processing pipeline — Phase 5.8.
+"""Query processing pipeline — Phase 5.8 + Phase A/B.
 
 Orchestrates the full RAG → LLM pipeline for a single mechanic query:
   1. Redis rate limiting
-  2. Hybrid retrieval (embed → dense+sparse → rerank)
-  3. Early exit if no_answer
-  4. Query classification (simple|complex)
-  5. Prior context assembly for complex queries
-  6. LLM response generation with Langfuse tracing
-  7. Async Query row persistence (after SSE stream ends)
+  2. Load session history (before retrieval, for reformulator)
+  3. Query reformulation (expand follow-up into specific retrieval queries)
+  4. Multi-query hybrid retrieval (embed → dense+sparse → rerank, parallel)
+  5. Early exit if no_answer
+  6. Query classification (simple|complex)
+  7. Prior context assembly (reuses history from step 2, no second DB call)
+  8. LLM response generation with Langfuse tracing
+  9. Async Query row persistence (after SSE stream ends)
 
 Public API:
     QueryService(session).process(query_text, session_id, machine_model, user_id, redis)
@@ -21,10 +23,11 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.classifier import classify_query
+from app.agent.reformulator import reformulate
 from app.agent.responder import respond
 from app.core.security import check_rate_limit
 from app.models.query import Query
-from app.rag.retriever import retrieve
+from app.rag.multi_retriever import multi_retrieve
 from app.schemas.query import QueryResponse
 from app.services.session_service import SessionService
 
@@ -45,23 +48,38 @@ class QueryService:
 
         Steps:
             1. check_rate_limit — 15 req/min per user_id (HTTP 429 on exceed)
-            2. retrieve() — embed + dense/sparse + rerank (pipeline entry point)
-            3. no_answer early return — skips ALL LLM calls when score < 0.30
-            4. classify_query() — "simple" | "complex"
-            5. get_history() — prior Q&A context for complex sessions
-            6. respond() — LLM generation with routing + Langfuse tracing
+            2. get_history() — load session history BEFORE retrieval
+            3. reformulate() — expand follow-up into specific retrieval queries
+            4. multi_retrieve() — embed + dense/sparse + rerank (parallel for N queries)
+            5. no_answer early return — skips ALL LLM calls when score < 0.30
+            6. classify_query() — "simple" | "complex" (always original query_text)
+            7. prior_context — reuse history from step 2 (no second DB call)
+            8. respond() — LLM generation with routing + Langfuse tracing
         """
         # 1. Rate limit
         await check_rate_limit(user_id, redis)
 
-        # 2. Retrieval (embed_text is called inside retrieve)
-        retrieval_result = await retrieve(
-            query_text=query_text,
+        # 2. Load history BEFORE retrieval so reformulator can use it
+        history: list[str] = []
+        if session_id is not None:
+            raw_history = await SessionService(self._session).get_history(session_id)
+            if raw_history:
+                history = [
+                    f"Вопрос: {q.query_text}\nОтвет: {q.response_text or ''}"
+                    for q in raw_history
+                ]
+
+        # 3. Reformulate: expand follow-up into specific retrieval queries
+        retrieval_queries = await reformulate(history, query_text)
+
+        # 4. Multi-query retrieval (handles single-query case internally)
+        retrieval_result = await multi_retrieve(
+            queries=retrieval_queries,
             machine_model=machine_model,
             session=self._session,
         )
 
-        # 3. no_answer — skip all LLM calls
+        # 5. no_answer — skip all LLM calls
         if retrieval_result.no_answer:
             if retrieval_result.embed_failed:
                 return QueryResponse(
@@ -80,21 +98,13 @@ class QueryService:
                 session_id=session_id,
             )
 
-        # 4. Classification
+        # 6. Classification (always on original query_text)
         query_class = await classify_query(query_text)
 
-        # 5. Prior context — load for any query within a session so follow-up
-        # questions ("simple" class) still receive conversation history
-        prior_context: list[str] | None = None
-        if session_id is not None:
-            history = await SessionService(self._session).get_history(session_id)
-            if history:
-                prior_context = [
-                    f"Вопрос: {q.query_text}\nОтвет: {q.response_text or ''}"
-                    for q in history
-                ]
+        # 7. prior_context from history loaded in step 2 (no second DB call)
+        prior_context: list[str] | None = history if history else None
 
-        # 6. Generate response
+        # 8. Generate response (always original query_text for LLM)
         return await respond(
             query_text=query_text,
             retrieval_result=retrieval_result,
