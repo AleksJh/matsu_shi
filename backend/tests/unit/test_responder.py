@@ -414,3 +414,48 @@ async def test_respond_simple_with_prior_context_includes_history():
     assert captured_prompt, "ResponderAgent.run was not called"
     assert "История диагностики:" in captured_prompt[0]
     assert "Гидравлический фильтр №7." in captured_prompt[0]
+
+
+# ---------------------------------------------------------------------------
+# 16. no_answer=True when LLM itself returns NO_ANSWER_TEXT (Rule #2 path)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_no_answer_flag_true_when_llm_returns_fixed_string():
+    """When the LLM returns the exact NO_ANSWER_TEXT string (Rule #2), the
+    resulting QueryResponse must have no_answer=True, not False.
+
+    This is distinct from the retrieval bypass path (no_answer in RetrievalResult):
+    here retrieval succeeds (score=0.70, no_answer=False) but the LLM decides
+    the context doesn't answer the question and returns the fixed Russian string."""
+    retrieval = _make_retrieval_result(max_score=0.70, no_answer=False)
+    # LLM returns the exact no-answer string per Rule #2
+    fake_llm = _make_llm_response(answer=NO_ANSWER_TEXT, citations=[])
+
+    with patch.object(ResponderAgent, "run", new=AsyncMock(return_value=fake_llm)):
+        result = await respond(
+            query_text="А может ли проблема быть из-за электромагнитного клапана?",
+            retrieval_result=retrieval,
+            query_class="simple",
+            session_id=13,
+        )
+
+    assert result.no_answer is True
+    assert result.answer == NO_ANSWER_TEXT
+
+
+@pytest.mark.asyncio
+async def test_no_answer_flag_false_when_llm_returns_real_answer():
+    """When LLM returns a genuine answer, no_answer must remain False."""
+    retrieval = _make_retrieval_result(max_score=0.80, no_answer=False)
+    fake_llm = _make_llm_response(answer="Проверьте генератор [1].")
+
+    with patch.object(ResponderAgent, "run", new=AsyncMock(return_value=fake_llm)):
+        result = await respond(
+            query_text="Почему разряжается аккумулятор?",
+            retrieval_result=retrieval,
+            query_class="simple",
+            session_id=None,
+        )
+
+    assert result.no_answer is False

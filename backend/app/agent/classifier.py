@@ -33,8 +33,13 @@ ClassifierAgent: Agent[None, ClassifierOutput] = Agent(
 )
 
 
-async def classify_query(query_text: str) -> str:
+async def classify_query(query_text: str, history: list[str] | None = None) -> str:
     """Classify a mechanic's query as 'simple' or 'complex'.
+
+    When *history* is provided (non-empty list of prior Q&A strings), the last
+    two entries are prepended to the prompt so the agent can classify the
+    follow-up in the context of the ongoing diagnostic session — preventing
+    short follow-up questions from being misclassified as 'simple'.
 
     Retries up to 20 times on Gemini 503 UNAVAILABLE errors (2 s flat wait).
     Raises on all other exceptions or after exhausting retries (PRD §6.2, Roadmap 9.6).
@@ -42,9 +47,15 @@ async def classify_query(query_text: str) -> str:
     Returns:
         "simple" or "complex" string.
     """
+    if history:
+        ctx = "\n\n".join(history[-2:])
+        prompt = f"Контекст сессии:\n{ctx}\n\nНовый вопрос: {query_text}"
+    else:
+        prompt = query_text
+
     for _attempt in range(20):
         try:
-            result = await ClassifierAgent.run(query_text)
+            result = await ClassifierAgent.run(prompt)
             return result.output.query_class
         except Exception as _exc:
             if _attempt < 19 and "503" in str(_exc):

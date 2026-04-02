@@ -196,6 +196,11 @@ async def respond(
         result.output.answer, result.output.citations
     )
 
+    # Detect if the LLM returned the fixed no-answer string per Rule #2 of the
+    # system prompt.  In that case no_answer must be True (consistent with the
+    # retrieval bypass path) so analytics reflect the actual response quality.
+    no_answer_flag = (normalized_answer == NO_ANSWER_TEXT)
+
     # Image search — one vector search filtered to visual_caption chunks
     visual_result = await retrieve_visual(
         query_text=query_text,
@@ -230,7 +235,7 @@ async def respond(
             "model_used": model_label,
             "retrieval_score": retrieval_result.max_score,
             "query_class": query_class,
-            "no_answer": False,
+            "no_answer": no_answer_flag,
             "session_id": session_id,
         }
     )

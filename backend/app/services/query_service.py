@@ -28,6 +28,7 @@ from app.agent.responder import respond
 from app.core.security import check_rate_limit
 from app.models.query import Query
 from app.rag.multi_retriever import multi_retrieve
+from app.rag.retriever import RetrievalResult
 from app.schemas.query import QueryResponse
 from app.services.session_service import SessionService
 
@@ -35,6 +36,7 @@ from app.services.session_service import SessionService
 class QueryService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._last_retrieval_result: RetrievalResult | None = None
 
     async def process(
         self,
@@ -78,6 +80,7 @@ class QueryService:
             machine_model=machine_model,
             session=self._session,
         )
+        self._last_retrieval_result = retrieval_result
 
         # 5. no_answer — skip all LLM calls
         if retrieval_result.no_answer:
@@ -98,8 +101,9 @@ class QueryService:
                 session_id=session_id,
             )
 
-        # 6. Classification (always on original query_text)
-        query_class = await classify_query(query_text)
+        # 6. Classification — pass history so follow-up questions in active
+        #    diagnostic sessions are classified as "complex", not "simple"
+        query_class = await classify_query(query_text, history=history or None)
 
         # 7. prior_context from history loaded in step 2 (no second DB call)
         prior_context: list[str] | None = history if history else None
@@ -131,7 +135,11 @@ class QueryService:
         the session is still open (it is, for the full FastAPI request lifespan).
         """
         try:
-            chunk_ids: list[int] = []  # populated by retriever when chunks are returned
+            chunk_ids: list[int] = (
+                [c.id for c, _ in self._last_retrieval_result.chunks if c.id is not None]
+                if self._last_retrieval_result
+                else []
+            )
             query = Query(
                 session_id=session_id,
                 user_id=user_id,
