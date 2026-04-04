@@ -442,6 +442,30 @@
 - Verify Loguru logs are readable in `docker compose logs backend`.
 - Verify admin `/stats` command in Telegram returns accurate numbers.
 
+### ✅ 9.7 5-Step Mechanic Registration FSM
+- Before admin approval, new users complete a guided form: ФИО → Country (inline keyboard, ~37 options) → City (free text) → E-mail → Phone.
+- Implemented as aiogram FSM (`RegistrationState`) with `MemoryStorage`; all state persisted across messages.
+- `create_pending()` extended with 5 optional fields; migration `0002` adds columns to `users` table.
+- Existing active users bypass the FSM entirely — backward-compatible.
+
+### ✅ 9.8 Admin Bot Dashboard Button
+- Replaced bot command menu for admin with a single inline URL button: `🖥 Открыть Admin Dashboard` → `{APP_BASE_URL}/admin/`.
+- Keeps the Telegram bot interface minimal; all management happens in the web dashboard.
+
+### ✅ 9.9 UX: Mini App Button on Approval
+- `cb_approve` now sends `ReplyKeyboardMarkup` with `WebAppInfo` directly in the approval message.
+- Mechanics no longer need to press `/start` after being approved — button appears immediately.
+
+### ✅ 9.10 Auth Returns User Object
+- `POST /api/v1/auth/telegram` now returns `user: UserOut` (id, telegram_user_id, first_name, username, status) alongside the token.
+- `authStore` in frontend can populate user state without a separate `/me` call.
+- `user` field is `Optional` in `TokenResponse` to stay compatible with admin login.
+
+### ✅ 9.11 Nginx Admin Proxy Fix
+- Fixed `Content-Type: text/html` on JS/CSS assets under `/admin/` — caused blank white screen.
+- Root cause: `proxy_pass` with a DNS variable does not auto-strip the location prefix for sub-paths.
+- Fix: explicit `rewrite ^/admin/(.*)$ /$1 break;` before `proxy_pass`.
+
 ### ✅ 9.6 Gemini 503 Retry in RAG Agent
 - `ClassifierAgent` and `ResponderAgent` (Pydantic AI) call Gemini at query time and are currently unprotected against 503 UNAVAILABLE spikes.
 - Add retry logic matching the ingest pipeline standard: 20 attempts, 2s flat wait, only on 503 errors.
