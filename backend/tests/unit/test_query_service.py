@@ -189,3 +189,53 @@ async def test_process_with_history_uses_complex_without_calling_classifier():
     assert respond_kwargs.get("query_class") == "complex", (
         f"Expected query_class='complex', got {respond_kwargs.get('query_class')!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_process_follow_up_passes_reformulated_query_to_respond():
+    """respond() must receive the context-expanded reformulated query, not the
+    raw follow-up text, so the LLM has the full diagnostic context to answer."""
+    mock_session = MagicMock()
+    mock_redis = MagicMock()
+
+    raw_follow_up = "А может ли быть проблема в электромагнитном клапане?"
+    expanded_query = "WB97S не заводится мигают лампы аккумулятор электромагнитный клапан коробка передач"
+
+    fake_history = [_make_history_query()]
+    fake_retrieval = _make_process_retrieval_result()
+    fake_response = QueryResponse(
+        answer="Электромагнитный клапан управляет трансмиссией.",
+        citations=[],
+        model_used="advanced",
+        retrieval_score=0.80,
+        query_class="complex",
+        no_answer=False,
+        session_id=5,
+    )
+
+    with patch("app.services.query_service.check_rate_limit", new=AsyncMock()), \
+         patch("app.services.query_service.SessionService") as mock_svc_cls, \
+         patch("app.services.query_service.reformulate", new=AsyncMock(return_value=[expanded_query])) as mock_reformulate, \
+         patch("app.services.query_service.multi_retrieve", new=AsyncMock(return_value=fake_retrieval)), \
+         patch("app.services.query_service.classify_query", new=AsyncMock(return_value="complex")), \
+         patch("app.services.query_service.respond", new=AsyncMock(return_value=fake_response)) as mock_respond:
+
+        mock_svc_instance = MagicMock()
+        mock_svc_instance.get_history = AsyncMock(return_value=fake_history)
+        mock_svc_cls.return_value = mock_svc_instance
+
+        svc = QueryService(mock_session)
+        await svc.process(
+            query_text=raw_follow_up,
+            session_id=5,
+            machine_model="WB97S",
+            user_id=1,
+            redis=mock_redis,
+        )
+
+    _, respond_kwargs = mock_respond.call_args
+    actual_query_text = respond_kwargs.get("query_text")
+    assert actual_query_text == expanded_query, (
+        f"Expected respond() to receive reformulated query:\n  {expanded_query!r}\n"
+        f"Got:\n  {actual_query_text!r}"
+    )

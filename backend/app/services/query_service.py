@@ -111,9 +111,10 @@ class QueryService:
         # 7. prior_context from history loaded in step 2 (no second DB call)
         prior_context: list[str] | None = history if history else None
 
-        # 8. Generate response (always original query_text for LLM)
+        # 8. Generate response — use reformulated query so LLM sees full diagnostic context
+        llm_query = retrieval_queries[0]
         return await respond(
-            query_text=query_text,
+            query_text=llm_query,
             retrieval_result=retrieval_result,
             query_class=query_class,
             session_id=session_id,
