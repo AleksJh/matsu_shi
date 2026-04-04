@@ -41,11 +41,9 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg16
-    ports:
-      - "5432:5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: matsu_shi
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -58,8 +56,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
