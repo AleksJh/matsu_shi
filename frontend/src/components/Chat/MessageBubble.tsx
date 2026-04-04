@@ -18,7 +18,7 @@ function injectCitationSpans(answer: string, citations: Citation[]): string {
   return answer.replace(/\[(\d+)\]/g, (_match, numStr) => {
     const idx = parseInt(numStr, 10)
     if (idx >= 1 && idx <= citations.length) {
-      return `<span class="citation-marker" data-idx="${idx}" style="display:inline;cursor:pointer;color:var(--ms-green);font-size:0.75em;vertical-align:super;font-weight:600;">[${idx}]</span>`
+      return `<span class="citation-marker" data-idx="${idx}" style="display:inline;cursor:pointer;color:var(--ms-accent);font-size:0.75em;vertical-align:super;font-weight:600;">[${idx}]</span>`
     }
     return ''  // Strip out-of-range markers
   })
@@ -81,7 +81,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         }`}
         style={{
           background: isUser
-            ? 'var(--ms-green)'
+            ? 'var(--ms-dark)'
             : 'var(--tg-theme-secondary-bg-color, #f0f0f0)',
           color: isUser
             ? 'var(--tg-theme-button-text-color, #ffffff)'
@@ -111,9 +111,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               <span
                 className="mt-2 inline-flex cursor-help items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
                 style={{
-                  background: 'var(--ms-yellow)',
-                  color: '#1a1a1a',
-                  border: '1px solid var(--ms-yellow-dark)',
+                  background: 'var(--ms-accent)',
+                  color: '#ffffff',
+                  border: '1px solid var(--ms-accent-hover)',
                 }}
                 title="Для этого сложного запроса была использована расширенная языковая модель с глубоким контекстным анализом"
               >

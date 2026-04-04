@@ -5,13 +5,15 @@ export default {
     extend: {
       colors: {
         matsu: {
-          green: '#1e5c38',
-          'green-hover': '#17472c',
-          'green-tint': '#edf7f1',
-          yellow: '#FFC200',
-          'yellow-dark': '#E6AF00',
+          primary: '#E8971C',
+          'primary-hover': '#C97E14',
+          'primary-tint': '#FDF3E0',
+          dark: '#1C2A1E',
+          'dark-hover': '#142018',
+          accent: '#3CADD8',
+          'accent-hover': '#2E9ECF',
           steel: '#6b7c87',
-          charcoal: '#2b2d32',
+          charcoal: '#1A1A1F',
         },
       },
     },

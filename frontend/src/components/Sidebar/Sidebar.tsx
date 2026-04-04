@@ -41,7 +41,7 @@ export function Sidebar({ onClose }: SidebarProps) {
           onClick={() => setActiveSession(null)}
           className="w-full rounded-lg px-4 py-2 text-sm font-medium"
           style={{
-            background: 'var(--ms-green)',
+            background: 'var(--ms-primary)',
             color: '#ffffff',
           }}
         >

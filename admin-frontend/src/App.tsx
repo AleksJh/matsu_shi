@@ -26,7 +26,7 @@ function AppLayout() {
             to={link.to}
             className={({ isActive }) =>
               `text-sm font-medium transition-colors ${
-                isActive ? 'text-blue-600' : 'text-gray-500 hover:text-gray-800'
+                isActive ? 'text-matsu-primary' : 'text-gray-500 hover:text-gray-800'
               }`
             }
           >

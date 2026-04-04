@@ -36,7 +36,7 @@ function dateBucket(iso: string | null | undefined): string {
 
 function statusColor(status: Session['status']): string {
   switch (status) {
-    case 'active': return 'var(--ms-yellow)'
+    case 'active': return 'var(--ms-primary)'
     case 'paused': return '#FF9500'
     case 'completed': return 'var(--tg-theme-hint-color, #999999)'
   }
@@ -124,7 +124,7 @@ function SessionItem({ session, isActive, onSelect }: SessionItemProps) {
           ? 'var(--tg-theme-secondary-bg-color, #f0f0f0)'
           : 'transparent',
         borderLeft: isActive
-          ? '3px solid var(--ms-green)'
+          ? '3px solid var(--ms-primary)'
           : '3px solid transparent',
       }}
       onClick={() => !renaming && onSelect(session.id)}
@@ -321,7 +321,7 @@ export function SessionList() {
             className="rounded-full px-3 py-1 text-xs font-medium transition-colors"
             style={{
               background: viewMode === mode
-                ? 'var(--ms-green)'
+                ? 'var(--ms-primary)'
                 : 'var(--tg-theme-secondary-bg-color, #f0f0f0)',
               color: viewMode === mode
                 ? '#ffffff'

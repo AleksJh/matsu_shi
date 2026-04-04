@@ -59,7 +59,7 @@ export function NewSessionPanel() {
       ) : models.length === 0 ? (
         <div
           className="h-8 w-8 animate-spin rounded-full border-2 border-t-transparent"
-          style={{ borderColor: 'var(--tg-theme-button-color, #2481cc)' }}
+          style={{ borderColor: 'var(--ms-primary)' }}
         />
       ) : (
         <div className="flex flex-wrap justify-center gap-3">
@@ -72,7 +72,7 @@ export function NewSessionPanel() {
               style={{
                 background: creatingModel === model
                   ? 'var(--ms-steel)'
-                  : 'var(--ms-green)',
+                  : 'var(--ms-primary)',
                 color: '#ffffff',
                 minWidth: '120px',
               }}
