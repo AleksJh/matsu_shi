@@ -55,7 +55,6 @@ interface SessionItemProps {
 function SessionItem({ session, isActive, onSelect }: SessionItemProps) {
   const removeSession = useSessionStore((s) => s.removeSession)
   const updateSessionTitle = useSessionStore((s) => s.updateSessionTitle)
-  const setActiveSession = useSessionStore((s) => s.setActiveSession)
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
