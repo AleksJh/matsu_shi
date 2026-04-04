@@ -144,7 +144,7 @@ export function ChatPanel({ onMenuClick }: ChatPanelProps) {
             onClick={handleSend}
             disabled={isLoading || !inputText.trim()}
             className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-white disabled:opacity-40"
-            style={{ background: 'var(--tg-theme-button-color, #007aff)' }}
+            style={{ background: 'var(--ms-green)' }}
             aria-label="Отправить"
           >
             &#9658;

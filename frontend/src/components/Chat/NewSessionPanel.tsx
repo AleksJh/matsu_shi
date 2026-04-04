@@ -32,13 +32,12 @@ export function NewSessionPanel() {
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-8">
-      {/* Logo / icon */}
-      <div
-        className="mb-4 flex h-16 w-16 items-center justify-center rounded-full text-3xl"
-        style={{ background: 'var(--tg-theme-secondary-bg-color, #f0f0f0)' }}
-      >
-        🔧
-      </div>
+      {/* Logo */}
+      <img
+        src="/logo.jpg"
+        alt="Matsu Shi"
+        className="mb-4 h-20 w-20 rounded-2xl object-cover shadow-lg"
+      />
 
       <h2
         className="mb-1 text-lg font-semibold"
@@ -72,9 +71,9 @@ export function NewSessionPanel() {
               className="rounded-xl px-5 py-3 text-sm font-semibold shadow-sm transition-opacity disabled:opacity-50"
               style={{
                 background: creatingModel === model
-                  ? 'var(--tg-theme-hint-color, #999999)'
-                  : 'var(--tg-theme-button-color, #2481cc)',
-                color: 'var(--tg-theme-button-text-color, #ffffff)',
+                  ? 'var(--ms-steel)'
+                  : 'var(--ms-green)',
+                color: '#ffffff',
                 minWidth: '120px',
               }}
             >

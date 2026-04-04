@@ -41,8 +41,8 @@ export function Sidebar({ onClose }: SidebarProps) {
           onClick={() => setActiveSession(null)}
           className="w-full rounded-lg px-4 py-2 text-sm font-medium"
           style={{
-            background: 'var(--tg-theme-button-color, #2481cc)',
-            color: 'var(--tg-theme-button-text-color, #ffffff)',
+            background: 'var(--ms-green)',
+            color: '#ffffff',
           }}
         >
           Новая сессия
