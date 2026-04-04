@@ -109,13 +109,15 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             {message.query_id && <FeedbackButtons queryId={message.query_id} />}
             {message.response?.model_used === 'advanced' && (
               <span
-                className="mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-medium"
+                className="mt-2 inline-flex cursor-help items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
                 style={{
-                  background: 'var(--tg-theme-hint-color, #999999)',
-                  color: 'var(--tg-theme-button-text-color, #ffffff)',
+                  background: 'var(--tg-theme-secondary-bg-color, #f0f0f0)',
+                  color: 'var(--tg-theme-hint-color, #888888)',
+                  border: '1px solid var(--tg-theme-hint-color, #cccccc)',
                 }}
+                title="Для этого сложного запроса была использована расширенная языковая модель с глубоким контекстным анализом"
               >
-                Расширенный анализ
+                🔬 Расширенный анализ
               </span>
             )}
           </>

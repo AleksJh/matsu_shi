@@ -18,8 +18,10 @@ Public API:
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 
 from loguru import logger
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.classifier import classify_query
@@ -27,6 +29,7 @@ from app.agent.reformulator import reformulate
 from app.agent.responder import respond
 from app.core.security import check_rate_limit
 from app.models.query import Query
+from app.models.session import DiagnosticSession
 from app.rag.multi_retriever import multi_retrieve
 from app.rag.retriever import RetrievalResult
 from app.schemas.query import QueryResponse
@@ -157,6 +160,12 @@ class QueryService:
                 latency_ms=latency_ms,
             )
             self._session.add(query)
+            if session_id is not None:
+                await self._session.execute(
+                    update(DiagnosticSession)
+                    .where(DiagnosticSession.id == session_id)
+                    .values(updated_at=datetime.now(tz=timezone.utc))
+                )
             await self._session.commit()
         except Exception as exc:
             logger.warning("Failed to persist Query row: {}", exc)

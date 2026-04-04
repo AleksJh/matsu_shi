@@ -8,16 +8,19 @@ GET    /api/v1/chat/sessions/{id}/history Full message history for a session
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.agent.title_generator import generate_title
+from app.core.database import AsyncSessionLocal, get_db
 from app.core.security import get_current_user, get_redis
 from app.models.document import Document
 from app.models.session import DiagnosticSession
@@ -44,12 +47,18 @@ class SessionResponse(BaseModel):
     machine_model: str | None
     title: str | None
     status: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
 
 class UpdateStatusRequest(BaseModel):
     status: str  # "active" | "paused" | "completed"
+
+
+class RenameTitleRequest(BaseModel):
+    title: str
 
 
 class QueryRequest(BaseModel):
@@ -149,6 +158,48 @@ async def update_session_status(
     return {"ok": True}
 
 
+@router.delete("/chat/sessions/{session_id}", status_code=204)
+async def delete_session(
+    session_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Hard-delete a session and all its queries. Only owner can delete."""
+    svc = SessionService(db)
+    session = await svc.get_session(session_id)
+    if session is None or session.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    await svc.delete_session(session_id)
+
+
+@router.patch("/chat/sessions/{session_id}/title")
+async def rename_session(
+    session_id: int,
+    body: RenameTitleRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Rename a session title (max 100 chars). Only owner can rename."""
+    if not body.title.strip():
+        raise HTTPException(status_code=422, detail="Название не может быть пустым")
+    svc = SessionService(db)
+    session = await svc.get_session(session_id)
+    if session is None or session.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    await svc.rename_session(session_id, body.title.strip())
+    return {"ok": True}
+
+
+async def _auto_title(session_id: int, query_text: str, answer: str) -> None:
+    """Background task: generate and save a title for the first query in a session."""
+    try:
+        title = await generate_title(query_text, answer)
+        async with AsyncSessionLocal() as db:
+            await SessionService(db).rename_session(session_id, title)
+    except Exception as exc:
+        logger.warning("Auto-title failed for session {}: {}", session_id, exc)
+
+
 @router.post("/chat/query")
 async def query_endpoint(
     body: QueryRequest,
@@ -186,6 +237,8 @@ async def query_endpoint(
     )
     latency_ms = round((time.monotonic() - t0) * 1000)
 
+    needs_title = session_obj.title is None and response.model_used != "none"
+
     async def event_generator():
         yield f"data: {response.model_dump_json()}\n\n"
         # Persist after stream is delivered — session is still open here
@@ -196,6 +249,11 @@ async def query_endpoint(
             response=response,
             latency_ms=latency_ms,
         )
+        # Auto-generate title for the first query in this session
+        if needs_title:
+            asyncio.create_task(
+                _auto_title(body.session_id, body.query_text, response.answer)
+            )
 
     return StreamingResponse(
         event_generator(),

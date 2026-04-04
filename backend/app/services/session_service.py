@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.query import Query
@@ -49,6 +49,25 @@ class SessionService:
             update(DiagnosticSession)
             .where(DiagnosticSession.id == session_id)
             .values(status=status, updated_at=datetime.now(tz=timezone.utc))
+        )
+        await self._session.commit()
+
+    async def delete_session(self, session_id: int) -> None:
+        """Hard-delete a session and all its query rows (cascade via ORM)."""
+        await self._session.execute(
+            delete(Query).where(Query.session_id == session_id)
+        )
+        await self._session.execute(
+            delete(DiagnosticSession).where(DiagnosticSession.id == session_id)
+        )
+        await self._session.commit()
+
+    async def rename_session(self, session_id: int, title: str) -> None:
+        """Update the human-readable title of a session (max 100 chars)."""
+        await self._session.execute(
+            update(DiagnosticSession)
+            .where(DiagnosticSession.id == session_id)
+            .values(title=title[:100])
         )
         await self._session.commit()
 

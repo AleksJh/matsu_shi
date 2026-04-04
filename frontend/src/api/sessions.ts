@@ -15,3 +15,11 @@ export async function listSessions(): Promise<Session[]> {
   const { data } = await apiClient.get<Session[]>('/api/v1/chat/sessions')
   return data
 }
+
+export async function deleteSession(id: string): Promise<void> {
+  await apiClient.delete(`/api/v1/chat/sessions/${id}`)
+}
+
+export async function renameSession(id: string, title: string): Promise<void> {
+  await apiClient.patch(`/api/v1/chat/sessions/${id}/title`, { title })
+}

@@ -3,6 +3,7 @@ import { useSessionStore } from '../../store/sessionStore'
 import { useChat } from '../../hooks/useChat'
 import { useSSE } from '../../hooks/useSSE'
 import { MessageBubble } from './MessageBubble'
+import { NewSessionPanel } from './NewSessionPanel'
 
 function TypingIndicator() {
   return (
@@ -40,8 +41,9 @@ export function ChatPanel({ onMenuClick }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [inputText, setInputText] = useState('')
 
-  const title = activeSessionId
-    ? (sessions.find((s) => s.id === activeSessionId)?.machine_model ?? 'Матсу Ши')
+  const activeSession = activeSessionId ? sessions.find((s) => s.id === activeSessionId) : null
+  const title = activeSession
+    ? (activeSession.title ?? activeSession.machine_model ?? 'Матсу Ши')
     : 'Матсу Ши'
 
   async function handleSend() {
@@ -84,17 +86,23 @@ export function ChatPanel({ onMenuClick }: ChatPanelProps) {
         >
           &#9776;
         </button>
-        <span className="truncate font-semibold">{title}</span>
+        <div className="min-w-0 flex flex-col">
+          <span className="truncate font-semibold leading-tight">{title}</span>
+          {activeSession?.machine_model && (
+            <span
+              className="truncate text-xs"
+              style={{ color: 'var(--tg-theme-hint-color, #999999)' }}
+            >
+              {activeSession.machine_model}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Body */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {!activeSessionId ? (
-          <div className="flex flex-1 items-center justify-center">
-            <p style={{ color: 'var(--tg-theme-hint-color, #999999)' }}>
-              Выберите модель
-            </p>
-          </div>
+          <NewSessionPanel />
         ) : messages.length === 0 && !isLoading ? (
           <div className="flex flex-1 items-center justify-center">
             <p style={{ color: 'var(--tg-theme-hint-color, #999999)' }}>

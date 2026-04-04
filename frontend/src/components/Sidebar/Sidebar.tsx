@@ -1,6 +1,5 @@
 import { useAuthStore } from '../../store/authStore'
 import { useSessionStore } from '../../store/sessionStore'
-import { MachineModelSelector } from './MachineModelSelector'
 import { SessionList } from './SessionList'
 
 interface SidebarProps {
@@ -9,7 +8,6 @@ interface SidebarProps {
 
 export function Sidebar({ onClose }: SidebarProps) {
   const user = useAuthStore((s) => s.user)
-  const activeSessionId = useSessionStore((s) => s.activeSessionId)
   const setActiveSession = useSessionStore((s) => s.setActiveSession)
 
   return (
@@ -50,9 +48,6 @@ export function Sidebar({ onClose }: SidebarProps) {
           Новая сессия
         </button>
       </div>
-
-      {/* Machine model selector — shown only when no active session */}
-      {!activeSessionId && <MachineModelSelector />}
 
       {/* Session list */}
       <div className="px-4 pb-2">
