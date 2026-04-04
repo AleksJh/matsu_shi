@@ -77,23 +77,23 @@ export function ChatPanel({ onMenuClick }: ChatPanelProps) {
       {/* Header */}
       <div
         className="flex items-center gap-3 px-4 py-3"
-        style={{ borderBottom: '1px solid var(--tg-theme-hint-color, #cccccc)' }}
+        style={{ background: 'var(--ms-dark)' }}
       >
         {/* Hamburger — mobile only */}
         <button
           onClick={onMenuClick}
           className="text-xl leading-none sm:hidden"
-          style={{ color: 'var(--tg-theme-text-color, #000000)' }}
+          style={{ color: 'rgba(255,255,255,0.85)' }}
           aria-label="Открыть меню"
         >
           &#9776;
         </button>
         <div className="min-w-0 flex-1 flex flex-col">
-          <span className="truncate font-semibold leading-tight">{title}</span>
+          <span className="truncate font-semibold leading-tight" style={{ color: '#ffffff' }}>{title}</span>
           {activeSession?.machine_model && (
             <span
               className="truncate text-xs"
-              style={{ color: 'var(--tg-theme-hint-color, #999999)' }}
+              style={{ color: 'rgba(255,255,255,0.55)' }}
             >
               {activeSession.machine_model}
             </span>
@@ -103,7 +103,7 @@ export function ChatPanel({ onMenuClick }: ChatPanelProps) {
         <button
           onClick={toggleTheme}
           className="ml-2 flex-shrink-0 text-xl leading-none rounded-full w-8 h-8 flex items-center justify-center transition-opacity hover:opacity-70"
-          style={{ color: 'var(--tg-theme-text-color, #000000)' }}
+          style={{ color: 'rgba(255,255,255,0.85)' }}
           aria-label={theme === 'light' ? 'Тёмная тема' : 'Светлая тема'}
           title={theme === 'light' ? 'Тёмная тема' : 'Светлая тема'}
         >
