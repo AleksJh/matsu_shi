@@ -4,6 +4,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     env_file: .env
+    expose:
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -15,12 +17,16 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    expose:
+      - "80"
     restart: unless-stopped
 
   admin:
     build:
       context: ./admin-frontend
       dockerfile: Dockerfile
+    expose:
+      - "80"
     restart: unless-stopped
 
   postgres:
