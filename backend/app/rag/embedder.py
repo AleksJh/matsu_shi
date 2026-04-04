@@ -39,12 +39,29 @@ async def embed_text(text: str) -> list[float] | None:
                     json={"model": settings.EMBED_MODEL, "input": text, "dimensions": settings.EMBED_DIM},
                 )
                 response.raise_for_status()
-                data: list[float] = response.json()["data"][0]["embedding"]
+                body = response.json()
+                if "data" not in body:
+                    # OpenRouter sometimes returns {"error": {...}} with HTTP 200
+                    if _attempt < 19:
+                        logger.warning(
+                            "embed_text: no 'data' in response (attempt {}/20), body: {}, retrying in 2s ...",
+                            _attempt + 1,
+                            str(body)[:300],
+                        )
+                        await asyncio.sleep(2)
+                        continue
+                    logger.warning(
+                        "embed_text: no 'data' after 20 attempts, last body: {}",
+                        str(body)[:300],
+                    )
+                    return None
+                data: list[float] = body["data"][0]["embedding"]
                 return data
         except httpx.HTTPStatusError as exc:
-            if _attempt < 19 and exc.response.status_code == 503:
+            if _attempt < 19 and exc.response.status_code in (503, 429):
                 logger.warning(
-                    "embed_text: OpenRouter 503, attempt {}/20, waiting 2s ...",
+                    "embed_text: OpenRouter HTTP {}, attempt {}/20, waiting 2s ...",
+                    exc.response.status_code,
                     _attempt + 1,
                 )
                 await asyncio.sleep(2)
@@ -59,7 +76,10 @@ async def embed_text(text: str) -> list[float] | None:
             logger.warning("embed_text: timeout при обращении к OpenRouter: {}", exc)
             return None
         except (KeyError, IndexError, ValueError) as exc:
-            logger.warning("embed_text: неожиданный формат ответа OpenRouter: {}", exc)
+            logger.warning(
+                "embed_text: неожиданный формат ответа OpenRouter: {}, body snippet logged above",
+                exc,
+            )
             return None
         except Exception as exc:  # noqa: BLE001
             logger.warning("embed_text: ошибка: {}", exc)
