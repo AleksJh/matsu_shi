@@ -1,144 +1,180 @@
-# Phase 9 — Pilot & Tuning
+# Infrastructure Audit & Hardening — Matsu-Shi
 
-## 1. Текущая фаза и задача
+## Роль и контекст
 
-**Фаза:** Phase 9 — Pilot & Tuning  
-**Активные подзадачи:** 9.2 (Onboard) → 9.3 (Threshold Validation) → 9.4 (Verification) → 9.5 (Monitoring)
+Ты — ИИ-ассистент разработчика, который проводит **полный аудит инфраструктуры** production-приложения Matsu-Shi.
+У тебя есть SSH-доступ к серверу через алиас `ssh matsu` и полный доступ к репозиторию в текущей рабочей директории.
 
-**Что уже сделано в Phase 9:**
-- ✅ 9.1 — реальные документы загружены через `ingest.py`
-- ✅ 9.6 — Gemini 503 retry реализован в `classifier.py`, `responder.py`, `embedder.py`
-- ✅ Дополнительно (вне roadmap): регистрационная анкета FSM, user в auth response, кнопка при апруве
-
-**Текущие продакшен-данные:**
-- 4 активных пользователя: Alex (36 запросов), Andranik (0), Armen (6), Тигран (0)
-- Средний retrieval score: **0.578** (ниже порога 0.65 → большинство через advanced model)
-- No-answer: **28.5%** (12 из 42 запросов)
+**Важно:** не предпринимай никаких изменений, не обсудив их с пользователем. Это задача в режиме human-in-the-loop.
+Сначала исследуй → составь картину → покажи проблемы → предложи план → получи подтверждение → действуй.
 
 ---
 
-## 2. Цель
+## Контекст приложения
 
-Провести пилот с реальными механиками, собрать данные о качестве ответов, настроить
-пороги retrieval, пройти все тест-кейсы из PRD §13, убедиться что мониторинг работает.
+**Matsu-Shi** — Telegram-бот и веб-приложение для промышленных механиков. Стек:
 
----
+- **Backend**: Python / FastAPI / SQLAlchemy async / Alembic / aiogram (Telegram bot)
+- **Frontend**: React SPA (Vite + TypeScript + Tailwind) — интерфейс механика (Mini App)
+- **Admin**: React SPA (Vite + TypeScript + Tailwind) — панель администратора
+- **База данных**: PostgreSQL с расширением pgvector
+- **Кэш / очереди**: Redis
+- **Реверс-прокси**: Nginx (TLS termination, routing)
+- **Деплой**: Docker Compose на одном VPS (Ubuntu), домен `matsushi.xyz`
+- **TLS**: Let's Encrypt (certbot)
 
-## 3. Ссылки на PRD
-
-- **PRD §13** — полный Verification Plan (16 тест-кейсов)
-- **PRD §5.3** — пороги retrieval: `RETRIEVAL_SCORE_THRESHOLD=0.65`, `RETRIEVAL_NO_ANSWER_THRESHOLD=0.30`
-- **PRD §8** — Non-Functional Requirements (latency, hallucination, citation)
-
----
-
-## 4. Файлы для создания
-
-Нет (Phase 9 — операциональная, не кодовая).
+Репозиторий: `~/matsu_shi` на сервере.
 
 ---
 
-## 5. Файлы для изменения (при необходимости)
+## Что уже известно (симптомы, которые привели к этому аудиту)
 
-| Файл | Условие |
-|------|---------|
-| `.env` (на ВПС) | Если нужно изменить `RETRIEVAL_SCORE_THRESHOLD` или `RETRIEVAL_NO_ANSWER_THRESHOLD` |
+1. **Расхождение compose vs реальность**: `docker-compose.yml` описывал `admin` как `image: node:20-alpine` с `npm run dev`, тогда как реально на сервере работал контейнер, собранный вручную через `admin-frontend/Dockerfile` (multi-stage build → nginx:alpine). При `docker compose build admin` compose говорил `No services to build`.
 
----
+2. **Backend запускается с `--reload`** в продакшне (dev-флаг).
 
-## 6. Ключевые зависимости
+3. **Frontend** в compose — такой же паттерн `node:20-alpine` dev-сервер. Неизвестно: есть ли у него свой Dockerfile или он должен работать как dev-сервер.
 
-```
-backend/app/rag/retriever.py       — логика порогов (score < 0.30 → no_answer, < 0.65 → advanced)
-backend/app/agent/router.py        — модельный роутинг по score и query_class
-backend/app/core/config.py         — Settings: RETRIEVAL_SCORE_THRESHOLD, RETRIEVAL_NO_ANSWER_THRESHOLD
-```
+4. **Исторически что-то ломалось при деплоях** — предположительно из-за того, что compose не описывал реальное состояние.
 
 ---
 
-## 7. Implementation Notes
+## Цель задачи
 
-### 9.2 — Онбординг механиков
+Привести всю инфраструктуру к единому, воспроизводимому, production-ready состоянию, где:
 
-Теперь есть регистрационная анкета (FSM). Новый пользователь:
-1. `/start` → заполняет ФИО, страну, город, email, телефон
-2. Ты одобряешь → он получает кнопку Mini App прямо в сообщении об апруве
-3. Тест: проверь что Andranik теперь может зарегистрироваться через новый флоу
-
-Существующие пользователи не затронуты — у них нет `full_name` и т.д., это нормально.
-
-### 9.3 — Валидация порогов
-
-Текущая проблема: avg score = **0.578**, no-answer = **28.5%**
-
-Это может означать:
-- Запросы на темы не из загруженных документов → нормально
-- Документов мало или не те модели техники → нужно больше мануалов
-- Пороги слишком жёсткие → попробовать снизить `RETRIEVAL_NO_ANSWER_THRESHOLD` с 0.30 до 0.25
-
-Как смотреть: Langfuse dashboard → фильтр по `no_answer=true` → читаем query_text.
-
-### 9.4 — Verification Plan (PRD §13)
-
-Пройти 16 тест-кейсов вручную:
-
-| # | Тест | Как проверить |
-|---|------|--------------|
-| 1 | Auth flow | Новый пользователь → /start → анкета → апрув → Mini App |
-| 2 | Denied access | status=denied → /start → отказ, нет Mini App |
-| 3 | Machine model selector | Новая сессия → выбор модели → лок |
-| 4 | RAG accuracy | 10 известных кодов ошибок → правильные цитаты |
-| 5 | Hallucination | Запрос вне мануалов → "Информация не найдена..." |
-| 6 | Visual chunks | Запрос о схеме → `visual_url` → изображение в Mini App |
-| 7 | Domain filter | PC300 запрос → только PC300 чанки |
-| 8 | LLM routing | Score < 0.65 → `model_used = "advanced"` в БД |
-| 9 | Step-by-Step | Сложный запрос → сессия сохраняется → возобновляется |
-| 10 | Citation presence | Все ответы содержат `[doc | section | page]` |
-| 11 | Rate limiting | 16 запросов за 60с → 16-й возвращает HTTP 429 |
-| 12 | Admin ban | Бан active пользователя → следующий запрос HTTP 403 |
-| 13 | Feedback | 👎 → отображается в Queries в admin dashboard |
-| 14 | Ingestion CLI | `ingest.py` на новый PDF → документ в admin Documents |
-| 15 | Docker restart | `docker compose down && up` → все данные сохранены |
-| 16 | Telegram initData | Изменённый initData → HTTP 401 |
-
-### 9.5 — Monitoring Checklist
-
-- [ ] Langfuse dashboard: трейсы видны после каждого запроса
-- [ ] `docker compose logs backend` — структурированные логи читаемы
-- [ ] `/stats` в боте возвращает корректные числа
-- [ ] Admin dashboard `/admin/` → System page → графики обновляются
+- `docker compose up --build -d` на чистом сервере поднимает всё без ручных шагов
+- Все сервисы описаны в compose так же, как они реально работают
+- Нет dev-артефактов в продакшне (`--reload`, `npm run dev`, exposed dev-порты)
+- Секреты — только через `.env` / env vars, никакого хардкода
+- Nginx корректно проксирует все сервисы и не требует ручных правок после пересборки
 
 ---
 
-## 8. Интеграционные точки
+## Шаги исследования (выполняй последовательно, обсуждая с пользователем)
 
-```
-Telegram Bot (mechanic.py FSM)
-  └─► users table (full_name, country, city, email, phone)
-  └─► Admin notification (полные данные анкеты)
+### Шаг 1 — Инвентаризация: что реально запущено
 
-admin.py cb_approve
-  └─► Bot API: send ReplyKeyboardMarkup с WebAppInfo (прямая кнопка)
+Выполни на сервере и покажи полную картину:
 
-auth.py /auth/telegram
-  └─► TokenResponse: { access_token, user: UserOut }
-  └─► authStore.user (теперь не null)
+```bash
+# Все запущенные контейнеры с образами и портами
+docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}"
 
-retriever.py score thresholds
-  └─► config.py RETRIEVAL_SCORE_THRESHOLD (0.65)
-  └─► config.py RETRIEVAL_NO_ANSWER_THRESHOLD (0.30)
+# Откуда собран каждый образ (Dockerfile или pull)
+docker inspect $(docker ps -q) --format '{{.Name}}: image={{.Config.Image}} cmd={{.Config.Cmd}}'
+
+# Точки монтирования (volumes / bind mounts)
+docker inspect $(docker ps -q) --format '{{.Name}}: {{json .Mounts}}'
 ```
 
+### Шаг 2 — Инвентаризация: файлы в репозитории
+
+Проверь наличие Dockerfile в каждом сервисе:
+
+```bash
+ls ~/matsu_shi/backend/Dockerfile
+ls ~/matsu_shi/frontend/Dockerfile   # есть или нет?
+ls ~/matsu_shi/admin-frontend/Dockerfile
+cat ~/matsu_shi/docker-compose.yml
+```
+
+### Шаг 3 — Frontend: dev или prod?
+
+Это ключевой вопрос. Выясни:
+
+```bash
+# Есть ли production build у frontend?
+cat ~/matsu_shi/frontend/package.json   # есть ли скрипт "build"?
+cat ~/matsu_shi/frontend/vite.config.*  # base path настроен?
+
+# Что сейчас запущено в контейнере frontend
+docker inspect matsu_shi-frontend-1 --format '{{json .Config}}'
+docker exec matsu_shi-frontend-1 ls /usr/share/nginx/html 2>/dev/null || echo "no nginx html"
+```
+
+### Шаг 4 — Nginx: routing и upstream-конфиги
+
+```bash
+cat ~/matsu_shi/docker/nginx/nginx.conf
+# Проверь: правильно ли указаны порты upstream для каждого сервиса
+# admin: порт 80 (nginx в контейнере) или 5174?
+# frontend: порт 80 или 5173?
+```
+
+### Шаг 5 — Backend: production-ready?
+
+```bash
+cat ~/matsu_shi/backend/Dockerfile
+# Проверь: есть ли отдельный target для prod без --reload?
+grep -r "reload" ~/matsu_shi/docker-compose.yml
+grep -r "reload" ~/matsu_shi/backend/Dockerfile
+```
+
+### Шаг 6 — Redis и Postgres: персистентность и безопасность
+
+```bash
+# Postgres: есть ли password в .env (не захардкожен)?
+grep POSTGRES_PASSWORD ~/matsu_shi/.env | head -1 | sed 's/=.*/=***/'
+
+# Redis: есть ли requirepass?
+docker exec matsu_shi-redis-1 redis-cli config get requirepass
+```
+
+### Шаг 7 — TLS и certbot: автообновление
+
+```bash
+# Есть ли cron или systemd timer для certbot renew?
+crontab -l 2>/dev/null
+systemctl list-timers | grep certbot
+ls /etc/letsencrypt/renewal/
+```
+
+### Шаг 8 — Порты, открытые наружу
+
+```bash
+# Какие порты слушают снаружи (не только nginx)?
+ss -tlnp | grep -v '127.0.0.1'
+# Идеально: только 80, 443 (и 22 для SSH)
+# Плохо: 8000, 5173, 5174 открыты напрямую
+```
+
 ---
 
-## 9. Done When
+## После исследования: составь отчёт
 
-Phase 9 завершена когда:
-- [ ] Не менее 3 реальных механиков активно используют систему
-- [ ] Все 16 тест-кейсов PRD §13 пройдены (pass/fail задокументированы)
-- [ ] Пройдено ≥50 реальных запросов без галлюцинаций и без пропущенных цитат
-- [ ] Langfuse показывает трейсы для всех запросов
-- [ ] No-answer rate понятен (либо принят, либо устранён настройкой порогов)
+Оформи находки в виде таблицы:
 
-**Следующий шаг:** Пригласить Andranik заново зарегистрироваться через новый FSM флоу
-и убедиться что он может отправить первый запрос.
+| Сервис | Текущее состояние | Соответствие best practice | Что нужно исправить |
+|--------|-------------------|---------------------------|---------------------|
+| backend | ... | ✅ / ⚠️ / ❌ | ... |
+| frontend | ... | | |
+| admin | ... | | |
+| nginx | ... | | |
+| postgres | ... | | |
+| redis | ... | | |
+| TLS/certbot | ... | | |
+| Открытые порты | ... | | |
+
+Затем предложи **план изменений** (файлы, которые нужно создать/изменить) и жди подтверждения от пользователя перед тем как что-либо менять.
+
+---
+
+## Критерии завершения
+
+- [ ] `docker compose up --build -d` на сервере поднимает всё без ошибок и ручных шагов
+- [ ] Ни один dev-сервер (`npm run dev`, `--reload`) не работает в продакшне
+- [ ] Наружу открыты только порты 80, 443, 22
+- [ ] Nginx корректно проксирует `/` → frontend, `/admin/` → admin, `/api/` → backend
+- [ ] TLS-сертификат обновляется автоматически
+- [ ] Все образы описаны в `docker-compose.yml` через `build:` или официальные `image:` без ручных `docker build`
+- [ ] `.env` содержит все секреты, ни один секрет не захардкожен в коде или compose
+
+---
+
+## Соглашения проекта
+
+- Все сообщения пользователям (механикам) — на **русском**
+- Код, комментарии, переменные, названия файлов — на **английском**
+- Никакого raw SQL — только SQLAlchemy ORM (кроме Alembic-миграций)
+- Никаких секретов в коде — только env vars через pydantic-settings
