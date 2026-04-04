@@ -34,7 +34,7 @@ export function NewSessionPanel() {
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-8">
       {/* Logo */}
       <img
-        src="/logo.jpg"
+        src="/logo.png"
         alt="Matsu Shi"
         className="mb-4 h-20 w-20 rounded-2xl object-cover shadow-lg"
       />

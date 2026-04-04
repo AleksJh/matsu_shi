@@ -15,6 +15,46 @@
   --ms-charcoal: #1A1A1F;
 }
 
+/* Light theme — overrides Telegram theme variables */
+body[data-theme="light"] {
+  --tg-theme-bg-color: #ffffff;
+  --tg-theme-text-color: #111111;
+  --tg-theme-hint-color: #888888;
+  --tg-theme-secondary-bg-color: #f0f0f0;
+  --tg-theme-button-color: var(--ms-primary);
+  --tg-theme-button-text-color: #ffffff;
+}
+
+/* Dark theme — overrides Telegram theme variables */
+body[data-theme="dark"] {
+  --tg-theme-bg-color: #1a1a1f;
+  --tg-theme-text-color: #e8e8ec;
+  --tg-theme-hint-color: #888888;
+  --tg-theme-secondary-bg-color: #26262c;
+  --tg-theme-button-color: var(--ms-primary);
+  --tg-theme-button-text-color: #ffffff;
+}
+
+/* Light theme — overrides Telegram theme variables */
+body[data-theme="light"] {
+  --tg-theme-bg-color: #ffffff;
+  --tg-theme-text-color: #111111;
+  --tg-theme-hint-color: #888888;
+  --tg-theme-secondary-bg-color: #f0f0f0;
+  --tg-theme-button-color: var(--ms-primary);
+  --tg-theme-button-text-color: #ffffff;
+}
+
+/* Dark theme — overrides Telegram theme variables */
+body[data-theme="dark"] {
+  --tg-theme-bg-color: #1a1a1f;
+  --tg-theme-text-color: #e8e8ec;
+  --tg-theme-hint-color: #888888;
+  --tg-theme-secondary-bg-color: #26262c;
+  --tg-theme-button-color: var(--ms-primary);
+  --tg-theme-button-text-color: #ffffff;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;

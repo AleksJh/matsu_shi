@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from 'react'
 import { useSessionStore } from '../../store/sessionStore'
 import { useChat } from '../../hooks/useChat'
 import { useSSE } from '../../hooks/useSSE'
+import { useThemeStore } from '../../store/themeStore'
 import { MessageBubble } from './MessageBubble'
 import { NewSessionPanel } from './NewSessionPanel'
 
@@ -41,6 +42,7 @@ export function ChatPanel({ onMenuClick }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [inputText, setInputText] = useState('')
 
+  const { theme, toggle: toggleTheme } = useThemeStore()
   const activeSession = activeSessionId ? sessions.find((s) => s.id === activeSessionId) : null
   const title = activeSession
     ? (activeSession.title ?? activeSession.machine_model ?? 'Матсу Ши')
@@ -86,7 +88,7 @@ export function ChatPanel({ onMenuClick }: ChatPanelProps) {
         >
           &#9776;
         </button>
-        <div className="min-w-0 flex flex-col">
+        <div className="min-w-0 flex-1 flex flex-col">
           <span className="truncate font-semibold leading-tight">{title}</span>
           {activeSession?.machine_model && (
             <span
@@ -97,6 +99,16 @@ export function ChatPanel({ onMenuClick }: ChatPanelProps) {
             </span>
           )}
         </div>
+        {/* Theme toggle */}
+        <button
+          onClick={toggleTheme}
+          className="ml-2 flex-shrink-0 text-xl leading-none rounded-full w-8 h-8 flex items-center justify-center transition-opacity hover:opacity-70"
+          style={{ color: 'var(--tg-theme-text-color, #000000)' }}
+          aria-label={theme === 'light' ? 'Тёмная тема' : 'Светлая тема'}
+          title={theme === 'light' ? 'Тёмная тема' : 'Светлая тема'}
+        >
+          {theme === 'light' ? '🌙' : '☀️'}
+        </button>
       </div>
 
       {/* Body */}
