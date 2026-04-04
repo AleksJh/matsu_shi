@@ -252,7 +252,7 @@ async def respond(
                 trace_context=_tc,
                 model=model_name,
                 input={"query_class": query_class, "context_length": len(context)},
-                output={"model_used": model_label, "no_answer": False},
+                output={"model_used": model_label, "no_answer": no_answer_flag},
                 metadata={
                     "latency_ms": round((time.monotonic() - _t0) * 1000),
                     "retrieval_score": retrieval_result.max_score,

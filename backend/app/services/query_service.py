@@ -101,9 +101,12 @@ class QueryService:
                 session_id=session_id,
             )
 
-        # 6. Classification — pass history so follow-up questions in active
-        #    diagnostic sessions are classified as "complex", not "simple"
-        query_class = await classify_query(query_text, history=history or None)
+        # 6. Classification — follow-ups in active sessions always use advanced
+        #    model; only classify fresh queries (no history) via LLM.
+        if history:
+            query_class = "complex"
+        else:
+            query_class = await classify_query(query_text)
 
         # 7. prior_context from history loaded in step 2 (no second DB call)
         prior_context: list[str] | None = history if history else None
