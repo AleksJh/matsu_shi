@@ -36,9 +36,18 @@ class AdminLoginRequest(BaseModel):
     password: str
 
 
+class UserOut(BaseModel):
+    id: int
+    telegram_user_id: int
+    first_name: str | None
+    username: str | None
+    status: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    user: UserOut
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +86,16 @@ async def auth_telegram(
         )
 
     token = create_access_token(user_id=user.telegram_user_id, role="mechanic")
-    return TokenResponse(access_token=token)
+    return TokenResponse(
+        access_token=token,
+        user=UserOut(
+            id=user.id,
+            telegram_user_id=user.telegram_user_id,
+            first_name=user.first_name,
+            username=user.username,
+            status=user.status,
+        ),
+    )
 
 
 @router.post("/auth/admin/login", response_model=TokenResponse)

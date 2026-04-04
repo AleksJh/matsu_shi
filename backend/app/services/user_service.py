@@ -28,6 +28,11 @@ class UserService:
         telegram_user_id: int,
         username: str | None,
         first_name: str | None,
+        full_name: str | None = None,
+        country: str | None = None,
+        city: str | None = None,
+        email: str | None = None,
+        phone: str | None = None,
     ) -> User:
         """Insert a new User with status='pending' and return the persisted row."""
         user = User(
@@ -35,6 +40,11 @@ class UserService:
             username=username,
             first_name=first_name,
             status="pending",
+            full_name=full_name,
+            country=country,
+            city=city,
+            email=email,
+            phone=phone,
         )
         self._session.add(user)
         await self._session.commit()

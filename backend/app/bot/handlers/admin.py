@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from loguru import logger
 from sqlalchemy import func, select
@@ -76,9 +76,23 @@ async def cb_approve(call: CallbackQuery) -> None:
 
     display = user.first_name or str(tg_id)
     assert call.bot is not None
+
+    from app.core.config import settings as _settings
+
+    webapp_kb = ReplyKeyboardMarkup(
+        keyboard=[[
+            KeyboardButton(
+                text="🔧 Открыть Matsu Shi",
+                web_app=WebAppInfo(url=_settings.APP_BASE_URL),
+            )
+        ]],
+        resize_keyboard=True,
+    )
     await call.bot.send_message(
         tg_id,
-        f"✅ Ваш доступ одобрен, {display}! Нажмите /start для входа в систему.",
+        f"✅ Ваш доступ одобрен, {display}!\n\n"
+        "Нажмите кнопку ниже, чтобы открыть приложение 👇",
+        reply_markup=webapp_kb,
     )
 
 

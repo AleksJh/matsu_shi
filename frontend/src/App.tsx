@@ -19,7 +19,14 @@ function App() {
 
   if (error) return (
     <div className="flex h-screen items-center justify-center p-4">
-      <p className="text-red-500 text-center">{error}</p>
+      <div className="text-center max-w-xs">
+        <p className="text-red-500 mb-3">{error}</p>
+        {error.includes('Telegram') && (
+          <p className="text-sm text-gray-500">
+            Откройте приложение через кнопку «🔧 Открыть Matsu Shi» в чате с ботом.
+          </p>
+        )}
+      </div>
     </div>
   )
 
