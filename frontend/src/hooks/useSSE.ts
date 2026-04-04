@@ -1,5 +1,7 @@
 import { useAuthStore } from '../store/authStore'
 import { useMessageStore } from '../store/messageStore'
+import { useSessionStore } from '../store/sessionStore'
+import { listSessions } from '../api/sessions'
 import type { QueryResponse } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
@@ -17,6 +19,27 @@ const API_BASE = import.meta.env.VITE_API_URL ?? ''
  *  4. Build assistant message from QueryResponse
  *  5. Add to store, clear loading
  */
+function scheduleTitleRefresh(sessionId: string) {
+  // Backend generates title asynchronously (~550ms after SSE).
+  // Poll twice: first at 700ms, retry at +700ms if still null.
+  const attempt = async () => {
+    try {
+      const fresh = await listSessions()
+      useSessionStore.getState().setSessions(fresh)
+      return fresh.find((s) => s.id === sessionId)?.title ?? null
+    } catch {
+      return null
+    }
+  }
+
+  setTimeout(async () => {
+    const title = await attempt()
+    if (!title) {
+      setTimeout(attempt, 700)
+    }
+  }, 700)
+}
+
 export function useSSE() {
   const addMessage = useMessageStore((s) => s.addMessage)
   const setLoading = useMessageStore((s) => s.setLoading)
@@ -80,6 +103,11 @@ export function useSSE() {
           response: parsed,
           created_at: new Date().toISOString(),
         })
+        // If session has no title yet, poll until backend generates it
+        const session = useSessionStore.getState().sessions.find((s) => s.id === sessionId)
+        if (session && !session.title) {
+          scheduleTitleRefresh(sessionId)
+        }
       }
     } catch (err) {
       console.error('[useSSE] error:', err)
