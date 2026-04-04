@@ -25,3 +25,16 @@ export async function updateUserStatus(id: number, status: string): Promise<User
   const { data } = await apiClient.put<UserItem>(`/api/v1/admin/users/${id}/status`, { status })
   return data
 }
+
+export async function deleteUser(id: number): Promise<void> {
+  await apiClient.delete(`/api/v1/admin/users/${id}`)
+}
+
+export async function deleteUsersBulk(ids: number[]): Promise<{ deleted: number }> {
+  const { data } = await apiClient.post<{ deleted: number }>('/api/v1/admin/users/bulk-delete', { ids })
+  return data
+}
+
+export async function sendUserMessage(id: number, message: string): Promise<void> {
+  await apiClient.post(`/api/v1/admin/users/${id}/message`, { message })
+}

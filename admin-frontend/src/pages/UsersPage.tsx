@@ -1,6 +1,12 @@
 import { useEffect, useState, useCallback } from 'react'
-import { listUsers, updateUserStatus, UserItem } from '../api/users'
-
+import {
+  listUsers,
+  updateUserStatus,
+  deleteUser,
+  deleteUsersBulk,
+  sendUserMessage,
+  UserItem,
+} from '../api/users'
 
 type StatusFilter = 'pending' | 'active' | 'denied' | 'banned' | undefined
 
@@ -65,6 +71,121 @@ function formatDate(iso: string): string {
 
 const LIMIT = 20
 
+// ---------------------------------------------------------------------------
+// Confirm delete dialog
+// ---------------------------------------------------------------------------
+
+interface ConfirmDeleteDialogProps {
+  count: number
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+function ConfirmDeleteDialog({ count, onConfirm, onCancel }: ConfirmDeleteDialogProps) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+        <h2 className="text-lg font-semibold text-gray-800 mb-2">Подтвердите удаление</h2>
+        <p className="text-sm text-gray-600 mb-6">
+          Будет безвозвратно удалено{' '}
+          <span className="font-semibold text-red-600">
+            {count} {count === 1 ? 'пользователь' : 'пользователей'}
+          </span>{' '}
+          вместе со всей историей запросов и сессиями.
+        </p>
+        <div className="flex gap-3 justify-end">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 rounded text-sm border border-gray-300 hover:border-gray-400 text-gray-700 transition-colors"
+          >
+            Отмена
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 rounded text-sm bg-red-600 hover:bg-red-700 text-white font-medium transition-colors"
+          >
+            Удалить
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Send message modal
+// ---------------------------------------------------------------------------
+
+interface SendMessageModalProps {
+  user: UserItem
+  onSend: (message: string) => Promise<void>
+  onClose: () => void
+}
+
+function SendMessageModal({ user, onSend, onClose }: SendMessageModalProps) {
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSend() {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    setSending(true)
+    setError(null)
+    try {
+      await onSend(trimmed)
+      onClose()
+    } catch {
+      setError('Не удалось отправить сообщение. Попробуйте снова.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const displayName = user.first_name ?? user.username ?? `#${user.id}`
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+        <h2 className="text-lg font-semibold text-gray-800 mb-1">Сообщение пользователю</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          {displayName}{user.username ? ` (@${user.username})` : ''}
+        </p>
+        <textarea
+          className="w-full border border-gray-300 rounded-lg p-3 text-sm resize-none focus:outline-none focus:border-blue-400 transition-colors"
+          rows={5}
+          placeholder="Введите текст сообщения..."
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          disabled={sending}
+          autoFocus
+        />
+        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        <div className="flex gap-3 justify-end mt-4">
+          <button
+            onClick={onClose}
+            disabled={sending}
+            className="px-4 py-2 rounded text-sm border border-gray-300 hover:border-gray-400 text-gray-700 transition-colors disabled:opacity-40"
+          >
+            Отмена
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={sending || !text.trim()}
+            className="px-4 py-2 rounded text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {sending ? 'Отправка...' : 'Отправить'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
+
 export default function UsersPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(undefined)
   const [page, setPage] = useState(1)
@@ -73,12 +194,23 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<number | null>(null)
 
+  // Selection state
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+
+  // Delete confirm dialog
+  const [confirmDelete, setConfirmDelete] = useState<{ ids: number[] } | null>(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+
+  // Message modal
+  const [messageTarget, setMessageTarget] = useState<UserItem | null>(null)
+
   const fetchUsers = useCallback(async (filter: StatusFilter, p: number) => {
     setIsLoading(true)
     setError(null)
     try {
       const data = await listUsers(filter, p, LIMIT)
       setItems(data)
+      setSelected(new Set())
     } catch {
       setError('Не удалось загрузить список пользователей.')
     } finally {
@@ -108,6 +240,63 @@ export default function UsersPage() {
     }
   }
 
+  // Selection helpers
+  const allIds = items.map((u) => u.id)
+  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id))
+  const someSelected = selected.size > 0
+
+  function toggleAll() {
+    if (allSelected) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(allIds))
+    }
+  }
+
+  function toggleOne(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  // Delete flow
+  function requestDelete(ids: number[]) {
+    setConfirmDelete({ ids })
+  }
+
+  async function confirmDeleteUsers() {
+    if (!confirmDelete) return
+    setDeleteLoading(true)
+    setError(null)
+    try {
+      const { ids } = confirmDelete
+      if (ids.length === 1) {
+        await deleteUser(ids[0])
+      } else {
+        await deleteUsersBulk(ids)
+      }
+      setConfirmDelete(null)
+      await fetchUsers(statusFilter, page)
+    } catch {
+      setError('Не удалось удалить пользователей. Попробуйте снова.')
+      setConfirmDelete(null)
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
+  // Send message flow
+  async function handleSendMessage(message: string) {
+    if (!messageTarget) return
+    await sendUserMessage(messageTarget.id, message)
+  }
+
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold text-gray-800 mb-6">Пользователи</h1>
@@ -129,11 +318,42 @@ export default function UsersPage() {
         ))}
       </div>
 
+      {/* Bulk actions bar */}
+      {someSelected && (
+        <div className="flex items-center gap-3 mb-3 px-4 py-2 bg-red-50 border border-red-200 rounded-lg">
+          <span className="text-sm text-red-700 font-medium">
+            Выбрано: {selected.size}
+          </span>
+          <button
+            disabled={deleteLoading}
+            onClick={() => requestDelete(Array.from(selected))}
+            className="px-3 py-1 rounded text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Удалить выбранных
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="ml-auto text-xs text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            Снять выделение
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-xl shadow overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
             <tr>
+              <th className="px-4 py-3 text-left w-8">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  className="cursor-pointer"
+                  title="Выбрать всех"
+                />
+              </th>
               <th className="px-4 py-3 text-left">Username</th>
               <th className="px-4 py-3 text-left">Имя</th>
               <th className="px-4 py-3 text-left">Статус</th>
@@ -145,19 +365,30 @@ export default function UsersPage() {
           <tbody className="divide-y divide-gray-100">
             {isLoading ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                   Загрузка...
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                   Нет пользователей
                 </td>
               </tr>
             ) : (
               items.map((user) => (
-                <tr key={user.id} className="hover:bg-gray-50">
+                <tr
+                  key={user.id}
+                  className={`hover:bg-gray-50 transition-colors ${selected.has(user.id) ? 'bg-red-50' : ''}`}
+                >
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(user.id)}
+                      onChange={() => toggleOne(user.id)}
+                      className="cursor-pointer"
+                    />
+                  </td>
                   <td className="px-4 py-3 text-gray-700">
                     {user.username ? `@${user.username}` : '—'}
                   </td>
@@ -172,7 +403,7 @@ export default function UsersPage() {
                   <td className="px-4 py-3 text-gray-500">{formatDate(user.created_at)}</td>
                   <td className="px-4 py-3 text-right text-gray-700">{user.query_count}</td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-2 flex-wrap">
+                    <div className="flex gap-2 flex-wrap items-center">
                       {getActions(user.status).map((action) => (
                         <button
                           key={action.targetStatus}
@@ -183,6 +414,20 @@ export default function UsersPage() {
                           {actionLoading === user.id ? '...' : action.label}
                         </button>
                       ))}
+                      <button
+                        onClick={() => setMessageTarget(user)}
+                        title="Отправить сообщение в Telegram"
+                        className="px-3 py-1 rounded text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white transition-colors"
+                      >
+                        Написать
+                      </button>
+                      <button
+                        onClick={() => requestDelete([user.id])}
+                        title="Удалить пользователя"
+                        className="px-3 py-1 rounded text-xs font-medium bg-red-100 hover:bg-red-200 text-red-700 transition-colors"
+                      >
+                        Удалить
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -213,6 +458,24 @@ export default function UsersPage() {
           Вперёд
         </button>
       </div>
+
+      {/* Confirm delete dialog */}
+      {confirmDelete && (
+        <ConfirmDeleteDialog
+          count={confirmDelete.ids.length}
+          onConfirm={confirmDeleteUsers}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+
+      {/* Send message modal */}
+      {messageTarget && (
+        <SendMessageModal
+          user={messageTarget}
+          onSend={handleSendMessage}
+          onClose={() => setMessageTarget(null)}
+        />
+      )}
     </div>
   )
 }

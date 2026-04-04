@@ -95,6 +95,14 @@ class StatsResponse(BaseModel):
     users: dict[str, int]
 
 
+class BulkDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+class SendMessageRequest(BaseModel):
+    message: str
+
+
 class BroadcastRequest(BaseModel):
     message: str
 
@@ -153,6 +161,62 @@ async def update_user_status(
         telegram_user_id=user.telegram_user_id,
         status=body.status,
     )
+    return {"ok": True}
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    _admin: AdminUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Permanently delete a user and all related data (cascade)."""
+    result = await db.scalars(select(User).where(User.id == user_id))
+    user = result.first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    await db.delete(user)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/users/bulk-delete")
+async def bulk_delete_users(
+    body: BulkDeleteRequest,
+    _admin: AdminUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Permanently delete multiple users by their id list."""
+    if not body.ids:
+        raise HTTPException(status_code=422, detail="Список id не может быть пустым")
+
+    result = await db.scalars(select(User).where(User.id.in_(body.ids)))
+    users = list(result.all())
+    for user in users:
+        await db.delete(user)
+    await db.commit()
+    return {"deleted": len(users)}
+
+
+@router.post("/users/{user_id}/message")
+async def send_message_to_user(
+    user_id: int,
+    body: SendMessageRequest,
+    _admin: AdminUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Send a Telegram message to a specific user via the bot."""
+    result = await db.scalars(select(User).where(User.id == user_id))
+    user = result.first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    try:
+        await bot.send_message(user.telegram_user_id, body.message)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось отправить сообщение: {exc}") from exc
+
     return {"ok": True}
 
 
