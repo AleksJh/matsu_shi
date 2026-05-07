@@ -1,0 +1,70 @@
+# Superpowers Integration for OpenCode
+
+General Principles
+Language: Chat in Russian. All technical output (code, comments, commits) must be in English.
+
+Engineering Standards
+- Git: Commit every logical subtask. Clear messages. Analyze history for complex issues.
+- TDD: Write robust tests (logic, security) before coding. Run full regression after each session. Do not modify existing tests without permission.
+- Security by Design: Apply cybersecurity standards from line one. Validate with specialized tests.
+- No Shortcuts: Implement general, robust logic. No hard-coding. No "time constraint" excuses.
+- Context Management: Read files before editing. No speculation.
+
+## CRITICAL: Always Check Skills First
+
+**BEFORE taking ANY action or responding to ANY user message:**
+
+1. Check if any Superpowers skill applies using the `skill` tool
+2. If a skill matches (even 1% chance), invoke it BEFORE responding
+3. Follow the skill's instructions EXACTLY
+
+## Skill Priority Order
+
+1. **Process skills first**: brainstorming, debugging — these determine HOW to approach
+2. **Implementation skills second**: TDD, subagent-driven-development — these guide execution
+
+## When Skills Apply
+
+| User says... | Check skill... |
+|--------------|----------------|
+| "Let's build X" / "Add feature" | brainstorming |
+| "Fix bug" / "Error" / "Not working" | systematic-debugging |
+| "Write tests" / "TDD" | test-driven-development |
+| "Plan" / "Implementation plan" | writing-plans |
+| "Execute plan" / "Implement plan" | executing-plans or subagent-driven-development |
+| "Code review" / "Review my code" | receiving-code-review |
+| "Commit" / "Merge" / "Done" | finishing-a-development-branch |
+| "Multiple tasks" / "Parallel" | dispatching-parallel-agents |
+| "Create skill" / "Edit skill" | writing-skills |
+| "Isolated workspace" / "Worktree" | using-git-worktrees |
+| "Verify" / "Tests pass" | verification-before-completion |
+| "Request review" / "PR" | requesting-code-review |
+
+## Skill Invocation
+
+Use the `skill` tool with the skill name:
+- `skill("brainstorming")`
+- `skill("systematic-debugging")`
+- `skill("test-driven-development")`
+- etc.
+
+## Tool Mapping
+
+| Claude Code | OpenCode |
+|-------------|----------|
+| TodoWrite | todowrite |
+| Task | @mention subagent |
+| Skill | skill |
+| Read/Write/Edit/Bash | Native tools |
+
+## Red Flags (Stop and Check Skills)
+
+- "This is just a simple question" → Questions are tasks, check skills
+- "I need more context first" → Skill check comes BEFORE context gathering
+- "Let me explore first" → Skills tell you HOW to explore
+- "This doesn't need a skill" → If skill exists, use it
+- "I'll just do this quickly" → Check BEFORE acting
+
+## User Instructions Priority
+
+User instructions (CLAUDE.md, AGENTS.md, direct requests) ALWAYS override skill instructions.

@@ -414,7 +414,7 @@
 
 ---
 
-## 🔄 PHASE 9 — Pilot & Tuning
+## ✅ PHASE 9 — Pilot & Tuning
 
 **Goal:** Real data is ingested, real mechanics onboarded, and thresholds are validated.
 
@@ -423,7 +423,7 @@
 - Verify each document appears in the admin Documents page with correct chunk_count and status `indexed`.
 - Spot-check 5–10 queries against each document and review retrieval scores in Langfuse.
 
-### ⏳ 9.2 Onboard Test Mechanics
+### ✅ 9.2 Onboard Test Mechanics
 - Invite 3–5 test mechanics to use the Telegram bot.
 - Walk through the full `/start` → pending → approval → Mini App flow.
 - Confirm they can select a machine model and submit queries.

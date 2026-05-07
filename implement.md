@@ -1,180 +1,179 @@
-# Infrastructure Audit & Hardening — Matsu-Shi
+# Phase 9.3 — Threshold Validation
 
-## Роль и контекст
+## 1. Текущая фаза и задача
 
-Ты — ИИ-ассистент разработчика, который проводит **полный аудит инфраструктуры** production-приложения Matsu-Shi.
-У тебя есть SSH-доступ к серверу через алиас `ssh matsu` и полный доступ к репозиторию в текущей рабочей директории.
-
-**Важно:** не предпринимай никаких изменений, не обсудив их с пользователем. Это задача в режиме human-in-the-loop.
-Сначала исследуй → составь картину → покажи проблемы → предложи план → получи подтверждение → действуй.
+- **Phase:** 9 — Pilot & Tuning
+- **Sub-task ID:** 9.3
+- **Title:** Threshold Validation
 
 ---
 
-## Контекст приложения
+## 2. Цель
 
-**Matsu-Shi** — Telegram-бот и веб-приложение для промышленных механиков. Стек:
+Проанализировать трассировки в Langfuse для первых 50+ запросов от тестовых механиков, оценить распределение `retrieval_score`, и при необходимости скорректировать пороговые значения в `.env` без изменения кода.
 
-- **Backend**: Python / FastAPI / SQLAlchemy async / Alembic / aiogram (Telegram bot)
-- **Frontend**: React SPA (Vite + TypeScript + Tailwind) — интерфейс механика (Mini App)
-- **Admin**: React SPA (Vite + TypeScript + Tailwind) — панель администратора
-- **База данных**: PostgreSQL с расширением pgvector
-- **Кэш / очереди**: Redis
-- **Реверс-прокси**: Nginx (TLS termination, routing)
-- **Деплой**: Docker Compose на одном VPS (Ubuntu), домен `matsushi.xyz`
-- **TLS**: Let's Encrypt (certbot)
-
-Репозиторий: `~/matsu_shi` на сервере.
+**Почему это важно:**
+- `RETRIEVAL_SCORE_THRESHOLD=0.65` определяет, когда используется lite vs advanced модель
+- `RETRIEVAL_NO_ANSWER_THRESHOLD=0.30` определяет, когда возвращается "not found"
+- Неправильные пороги приводят к: перерасходу API-бюджета или недостаточно качественным ответам
 
 ---
 
-## Что уже известно (симптомы, которые привели к этому аудиту)
+## 3. PRD References
 
-1. **Расхождение compose vs реальность**: `docker-compose.yml` описывал `admin` как `image: node:20-alpine` с `npm run dev`, тогда как реально на сервере работал контейнер, собранный вручную через `admin-frontend/Dockerfile` (multi-stage build → nginx:alpine). При `docker compose build admin` compose говорил `No services to build`.
-
-2. **Backend запускается с `--reload`** в продакшне (dev-флаг).
-
-3. **Frontend** в compose — такой же паттерн `node:20-alpine` dev-сервер. Неизвестно: есть ли у него свой Dockerfile или он должен работать как dev-сервер.
-
-4. **Исторически что-то ломалось при деплоях** — предположительно из-за того, что compose не описывал реальное состояние.
+- **§5.3** — Retrieval Score Thresholds: таблица с условиями и действиями
+- **§6.2** — Model Routing Logic: `if max_retrieval_score < 0.65 or query_class == "complex"`
+- **§8** — Non-functional requirements: P95 latency targets
 
 ---
 
-## Цель задачи
+## 4. Файлы для создания
 
-Привести всю инфраструктуру к единому, воспроизводимому, production-ready состоянию, где:
-
-- `docker compose up --build -d` на чистом сервере поднимает всё без ручных шагов
-- Все сервисы описаны в compose так же, как они реально работают
-- Нет dev-артефактов в продакшне (`--reload`, `npm run dev`, exposed dev-порты)
-- Секреты — только через `.env` / env vars, никакого хардкода
-- Nginx корректно проксирует все сервисы и не требует ручных правок после пересборки
+**Нет** — это аналитическая задача, код не требуется.
 
 ---
 
-## Шаги исследования (выполняй последовательно, обсуждая с пользователем)
+## 5. Файлы для модификации
 
-### Шаг 1 — Инвентаризация: что реально запущено
+| Файл | Изменения |
+|------|-----------|
+| `.env` | Опционально: `RETRIEVAL_SCORE_THRESHOLD`, `RETRIEVAL_NO_ANSWER_THRESHOLD` |
 
-Выполни на сервере и покажи полную картину:
+---
 
-```bash
-# Все запущенные контейнеры с образами и портами
-docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}"
+## 6. Ключевые импорты и зависимости
 
-# Откуда собран каждый образ (Dockerfile или pull)
-docker inspect $(docker ps -q) --format '{{.Name}}: image={{.Config.Image}} cmd={{.Config.Cmd}}'
+| Файл | Назначение |
+|------|------------|
+| `backend/app/core/config.py` | Чтение `RETRIEVAL_SCORE_THRESHOLD=0.65`, `RETRIEVAL_NO_ANSWER_THRESHOLD=0.30` |
+| `backend/app/rag/retriever.py` | Вычисляет `max_score` из dense retrieval; применяет пороги |
+| `backend/app/core/tracing.py` | Langfuse client для анализа трассировок |
 
-# Точки монтирования (volumes / bind mounts)
-docker inspect $(docker ps -q) --format '{{.Name}}: {{json .Mounts}}'
+**Dependency chain:**
 ```
-
-### Шаг 2 — Инвентаризация: файлы в репозитории
-
-Проверь наличие Dockerfile в каждом сервисе:
-
-```bash
-ls ~/matsu_shi/backend/Dockerfile
-ls ~/matsu_shi/frontend/Dockerfile   # есть или нет?
-ls ~/matsu_shi/admin-frontend/Dockerfile
-cat ~/matsu_shi/docker-compose.yml
-```
-
-### Шаг 3 — Frontend: dev или prod?
-
-Это ключевой вопрос. Выясни:
-
-```bash
-# Есть ли production build у frontend?
-cat ~/matsu_shi/frontend/package.json   # есть ли скрипт "build"?
-cat ~/matsu_shi/frontend/vite.config.*  # base path настроен?
-
-# Что сейчас запущено в контейнере frontend
-docker inspect matsu_shi-frontend-1 --format '{{json .Config}}'
-docker exec matsu_shi-frontend-1 ls /usr/share/nginx/html 2>/dev/null || echo "no nginx html"
-```
-
-### Шаг 4 — Nginx: routing и upstream-конфиги
-
-```bash
-cat ~/matsu_shi/docker/nginx/nginx.conf
-# Проверь: правильно ли указаны порты upstream для каждого сервиса
-# admin: порт 80 (nginx в контейнере) или 5174?
-# frontend: порт 80 или 5173?
-```
-
-### Шаг 5 — Backend: production-ready?
-
-```bash
-cat ~/matsu_shi/backend/Dockerfile
-# Проверь: есть ли отдельный target для prod без --reload?
-grep -r "reload" ~/matsu_shi/docker-compose.yml
-grep -r "reload" ~/matsu_shi/backend/Dockerfile
-```
-
-### Шаг 6 — Redis и Postgres: персистентность и безопасность
-
-```bash
-# Postgres: есть ли password в .env (не захардкожен)?
-grep POSTGRES_PASSWORD ~/matsu_shi/.env | head -1 | sed 's/=.*/=***/'
-
-# Redis: есть ли requirepass?
-docker exec matsu_shi-redis-1 redis-cli config get requirepass
-```
-
-### Шаг 7 — TLS и certbot: автообновление
-
-```bash
-# Есть ли cron или systemd timer для certbot renew?
-crontab -l 2>/dev/null
-systemctl list-timers | grep certbot
-ls /etc/letsencrypt/renewal/
-```
-
-### Шаг 8 — Порты, открытые наружу
-
-```bash
-# Какие порты слушают снаружи (не только nginx)?
-ss -tlnp | grep -v '127.0.0.1'
-# Идеально: только 80, 443 (и 22 для SSH)
-# Плохо: 8000, 5173, 5174 открыты напрямую
+Query → retrieve() → dense_retrieve() → max_score
+                             ↓
+                    RETRIEVAL_NO_ANSWER_THRESHOLD (0.30) → no_answer=True
+                             ↓
+                    RETRIEVAL_SCORE_THRESHOLD (0.65) → recommended_model
 ```
 
 ---
 
-## После исследования: составь отчёт
+## 7. Заметки по реализации
 
-Оформи находки в виде таблицы:
+**Пороги определены в `backend/app/core/config.py`:**
+```python
+RETRIEVAL_SCORE_THRESHOLD: float = 0.65
+RETRIEVAL_NO_ANSWER_THRESHOLD: float = 0.30
+```
 
-| Сервис | Текущее состояние | Соответствие best practice | Что нужно исправить |
-|--------|-------------------|---------------------------|---------------------|
-| backend | ... | ✅ / ⚠️ / ❌ | ... |
-| frontend | ... | | |
-| admin | ... | | |
-| nginx | ... | | |
-| postgres | ... | | |
-| redis | ... | | |
-| TLS/certbot | ... | | |
-| Открытые порты | ... | | |
+**Логика в `retriever.py` (§5.3):**
+```python
+# retriever.py:136 — early exit
+if max_score < settings.RETRIEVAL_NO_ANSWER_THRESHOLD:
+    return RetrievalResult(no_answer=True, ...)
 
-Затем предложи **план изменений** (файлы, которые нужно создать/изменить) и жди подтверждения от пользователя перед тем как что-либо менять.
+# retriever.py:171-175 — model routing
+recommended = (
+    settings.LLM_ADVANCED_MODEL
+    if max_score < settings.RETRIEVAL_SCORE_THRESHOLD
+    else settings.LLM_LITE_MODEL
+)
+```
+
+**Правила корректировки (§5.3):**
+
+| Проблема | Решение |
+|----------|---------|
+| Слишком много "Информация не найдена" | Уменьшить `RETRIEVAL_NO_ANSWER_THRESHOLD` (напр. 0.25) |
+| "not found" содержит hallucination | Увеличить `RETRIEVAL_NO_ANSWER_THRESHOLD` (напр. 0.35) |
+| Слишком много advanced-моделей | Увеличить `RETRIEVAL_SCORE_THRESHOLD` (напр. 0.70) |
+| Lite-ответы низкого качества | Уменьшить `RETRIEVAL_SCORE_THRESHOLD` (напр. 0.60) |
+
+**Анализ в Langfuse:**
+- Каждая трассировка содержит: `retrieval_score`, `model_used`, `query_class`, `no_answer`
+- Группировка по `model_used`: должно быть ~70% lite, ~30% advanced для типичной механики
+- Проверить: ни один ответ с `no_answer=True` не содержит hallucination
 
 ---
 
-## Критерии завершения
+## 8. Integration Points
 
-- [ ] `docker compose up --build -d` на сервере поднимает всё без ошибок и ручных шагов
-- [ ] Ни один dev-сервер (`npm run dev`, `--reload`) не работает в продакшне
-- [ ] Наружу открыты только порты 80, 443, 22
-- [ ] Nginx корректно проксирует `/` → frontend, `/admin/` → admin, `/api/` → backend
-- [ ] TLS-сертификат обновляется автоматически
-- [ ] Все образы описаны в `docker-compose.yml` через `build:` или официальные `image:` без ручных `docker build`
-- [ ] `.env` содержит все секреты, ни один секрет не захардкожен в коде или compose
+- **Phase 9.2** — результаты онбординга механиков генерируют данные для анализа
+- **Phase 9.4** — выводы из threshold validation влияют на результаты verification plan
+- **Phase 9.5** — мониторинг Langfuse подтверждает корректность порогов
 
 ---
 
-## Соглашения проекта
+## 9. Критерий завершения
 
-- Все сообщения пользователям (механикам) — на **русском**
-- Код, комментарии, переменные, названия файлов — на **английском**
-- Никакого raw SQL — только SQLAlchemy ORM (кроме Alembic-миграций)
-- Никаких секретов в коде — только env vars через pydantic-settings
+**Done When:**
+
+1. **Минимум 50 запросов накоплено в `queries` таблице:**
+   ```bash
+   docker compose exec backend python -c "
+   from app.core.database import AsyncSessionLocal
+   from sqlalchemy import select, func
+   from app.models.query import Query
+   import asyncio
+   
+   async def count():
+       async with AsyncSessionLocal() as s:
+           r = await s.execute(select(func.count(Query.id)))
+           print(f'Total queries: {r.scalar()}')
+   asyncio.run(count())
+   "
+   ```
+
+2. **Анализ распределения в Langfuse:**
+   - Открыть Langfuse dashboard
+   - Фильтровать по last 7 days
+   - Проверить: `retrieval_score` гистограмма
+   - Проверить: доля lite vs advanced моделей
+
+3. **Подтверждение: нет hallucination при no_answer:**
+   - Каждый ответ с `no_answer=True` содержит строго: "Информация не найдена. Попробуйте добавить конкретику в запрос."
+   - Нет сгенерированного текста в этих ответах
+
+4. **Опционально: корректировка порогов в `.env`:**
+   ```bash
+   # Если нужно изменить пороги:
+   # RETRIEVAL_SCORE_THRESHOLD=0.65  ← по умолчанию
+   # RETRIEVAL_NO_ANSWER_THRESHOLD=0.30  ← по умолчанию
+   ```
+
+**Verification steps:**
+```bash
+# 1. Проверить количество запросов
+docker compose exec postgres psql -U postgres -d matsu_shi \
+  -c "SELECT COUNT(*) FROM queries;"
+
+# 2. Проверить распределение retrieval_score
+docker compose exec postgres psql -U postgres -d matsu_shi \
+  -c "SELECT 
+        COUNT(*) as total,
+        AVG(retrieval_score) as avg_score,
+        MIN(retrieval_score) as min_score,
+        MAX(retrieval_score) as max_score,
+        SUM(CASE WHEN no_answer THEN 1 ELSE 0 END) as no_answer_count
+      FROM queries;"
+
+# 3. Проверить модель-использование
+docker compose exec postgres psql -U postgres -d matsu_shi \
+  -c "SELECT model_used, COUNT(*) FROM queries GROUP BY model_used;"
+
+# 4. Langfuse dashboard:
+#    -打开 Langfuse → проект → Traces
+#    - Фильтр: last 7 days
+#    - Группировка по query_class
+```
+
+---
+
+## 10. Следующие шаги
+
+После завершения Phase 9.3 → перейти к **Phase 9.4 (Run Verification Plan)**:
+- Выполнить все тесты из PRD §13 вручную
+- Задокументировать pass/fail для каждого теста
+- Исправить любые failures до завершения пилота
